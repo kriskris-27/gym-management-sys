@@ -46,8 +46,9 @@ model Attendance {
   autoClosed      Boolean   @default(false)
   createdAt       DateTime  @default(now())
 
-  @@unique([memberId, date])
+  @@index([memberId, date])
 }
+
 
 model Payment {
   id        String      @id @default(cuid())
