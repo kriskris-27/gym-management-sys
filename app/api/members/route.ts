@@ -1,0 +1,134 @@
+import { NextResponse } from "next/server"
+import prisma from "@/lib/prisma"
+import { MemberCreateSchema } from "@/lib/validations"
+// Pointing to local generated client for Prisma types
+import { Prisma } from "@prisma/client"
+
+
+/**
+ * GET: List all members with filtering and search
+ */
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const search = searchParams.get("search")
+  const status = searchParams.get("status")
+
+  try {
+    const where: any = {
+      // Hard block on deleted members
+      status: { not: "DELETED" },
+    }
+
+    // Status filtering (only allow ACTIVE/INACTIVE)
+    if (status && ["ACTIVE", "INACTIVE"].includes(status)) {
+      where.status = status
+    }
+
+    // Search by Name or Phone (case-insensitive)
+    if (search) {
+      // Prisma handles 'contains' sanitization internally
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { phone: { contains: search, mode: "insensitive" } },
+      ]
+    }
+
+    const members = await prisma.member.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        membershipType: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+    })
+
+    return NextResponse.json({ members })
+
+  } catch (error) {
+    return NextResponse.json({ error: "Could not retrieve members" }, { status: 500 })
+  }
+}
+
+/**
+ * POST: Create a new member with auto-calculated duration
+ */
+export async function POST(request: Request) {
+  try {
+    const body = await request.json()
+    const validated = MemberCreateSchema.safeParse(body)
+
+    if (!validated.success) {
+      return NextResponse.json({ 
+        error: (validated.error as any).issues[0].message 
+      }, { status: 400 })
+    }
+
+
+
+    const data = validated.data
+    const startDate = new Date(data.startDate)
+    let endDate: Date
+
+    // Auto-calculate endDate based on membershipType
+    if (data.membershipType === "PERSONAL_TRAINING" && data.endDate) {
+      endDate = new Date(data.endDate)
+    } else {
+      const daysMap = {
+        MONTHLY: 30,
+        QUARTERLY: 90,
+        HALF_YEARLY: 180,
+        ANNUAL: 365,
+      }
+      const daysToAdd = daysMap[data.membershipType as keyof typeof daysMap]
+      endDate = new Date(startDate)
+      endDate.setDate(startDate.getDate() + daysToAdd)
+    }
+
+    const member = await prisma.member.create({
+      data: {
+        ...data,
+        endDate,
+        status: "ACTIVE",
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        membershipType: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+        createdAt: true,
+      },
+    })
+
+    // Log historical/expired records as per instructions
+    if (new Date(member.endDate) < new Date()) {
+      console.log(`⚠️ Historical record added: Member ${member.id} already expired.`)
+    }
+
+    return NextResponse.json({ member }, { status: 201 })
+
+  } catch (error) {
+    // Log the full error to the server console for easier debugging
+    console.error("❌ API ERROR [POST /api/members]:", error)
+
+    // Handle specific Prisma duplicate constraint
+    // Using property check instead of instanceof for better reliability with pnpm symlinks
+    if ((error as any).code === "P2002") {
+      return NextResponse.json(
+        { error: "Member with this phone already exists" },
+        { status: 409 }
+      )
+    }
+
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+  }
+
+}

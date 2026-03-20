@@ -47,16 +47,20 @@ export const MemberCreateSchema = z.object({
   phone: z.string()
     .regex(PHONE_REGEX, "Invalid Indian mobile number (Must be 10 digits starting with 6-9)"),
   membershipType: MembershipTypeEnum,
-  startDate: z.coerce.date({ invalid_type_error: "Invalid start date" }),
-  endDate: z.coerce.date({ invalid_type_error: "Invalid end date" }),
+  startDate: z.coerce.date(),
+  endDate: z.coerce.date().optional(),
+
   status: MemberStatusEnum.default("ACTIVE"),
 }).strict()
-.refine((data) => data.endDate > data.startDate, {
+.refine((data) => {
+  if (data.endDate && data.startDate && data.endDate <= data.startDate) return false;
+  return true;
+}, {
   message: "Membership end date must be after the start date",
   path: ["endDate"],
 })
 .refine((data) => {
-  // Hard block for Personal Training if end date is missing (though coerced date validates presence)
+  // Hard block for Personal Training if end date is missing
   if (data.membershipType === "PERSONAL_TRAINING" && !data.endDate) return false;
   return true;
 }, {
@@ -64,12 +68,34 @@ export const MemberCreateSchema = z.object({
   path: ["endDate"],
 });
 
+
 /**
- * Member Update (Partial)
+ * Member Update (Partial updates, id required)
  */
-export const MemberUpdateSchema = MemberCreateSchema.partial().extend({
+export const MemberUpdateSchema = z.object({
   id: z.string().min(1, "Member ID is required"),
-}).strict();
+  name: z.string()
+    .trim()
+    .min(1, "Name cannot be empty")
+    .max(100, "Name too long")
+    .regex(NO_HTML_REGEX, "Name contains invalid characters")
+    .optional(),
+  phone: z.string()
+    .regex(PHONE_REGEX, "Invalid Indian mobile number")
+    .optional(),
+  membershipType: MembershipTypeEnum.optional(),
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
+  status: MemberStatusEnum.optional(),
+}).strict()
+.refine((data) => {
+  if (data.endDate && data.startDate && data.endDate <= data.startDate) return false;
+  return true;
+}, {
+  message: "Membership end date must be after the start date",
+  path: ["endDate"],
+});
+
 
 /**
  * Attendance Scanning
@@ -86,8 +112,9 @@ export const PaymentCreateSchema = z.object({
   amount: z.number()
     .positive("Amount must be a positive number")
     .max(99999, "Amount exceeds maximum transaction limit"),
-  date: z.coerce.date({ invalid_type_error: "Invalid payment date" })
+  date: z.coerce.date()
     .refine((date) => date <= new Date(new Date().setHours(23, 59, 59)), {
+
       message: "Payment date cannot be in the future",
     }),
   mode: PaymentModeEnum,
