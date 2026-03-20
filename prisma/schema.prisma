@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Owner {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now())
+}
+
+model Member {
+  id             String         @id @default(cuid())
+  name           String
+  phone          String         @unique
+  membershipType MembershipType
+  startDate      DateTime
+  endDate        DateTime
+  status         MemberStatus   @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+
+  attendance    Attendance[]
+  payments      Payment[]
+  notifications NotificationLog[]
+}
+
+model Attendance {
+  id              String    @id @default(cuid())
+  memberId        String
+  member          Member    @relation(fields: [memberId], references: [id])
+  date            DateTime  @db.Date
+  checkedInAt     DateTime
+  checkedOutAt    DateTime?
+  durationMinutes Int?
+  autoClosed      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+
+  @@unique([memberId, date])
+}
+
+model Payment {
+  id        String      @id @default(cuid())
+  memberId  String
+  member    Member      @relation(fields: [memberId], references: [id])
+  amount    Float
+  date      DateTime
+  mode      PaymentMode
+  notes     String?
+  createdAt DateTime    @default(now())
+}
+
+model NotificationLog {
+  id       String           @id @default(cuid())
+  memberId String
+  member   Member           @relation(fields: [memberId], references: [id])
+  type     NotificationType
+  sentAt   DateTime         @default(now())
+  status   String
+}
+
+enum MembershipType {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  ANNUAL
+  PERSONAL_TRAINING
+}
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  DELETED
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+}
+
+enum NotificationType {
+  EXPIRY_5_DAY
+  EXPIRY_1_DAY
+  INACTIVITY
+}
