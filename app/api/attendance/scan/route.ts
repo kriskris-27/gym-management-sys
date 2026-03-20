@@ -85,10 +85,11 @@ export async function POST(request: Request) {
     }
 
     const isExpired = now > new Date(member.endDate)
-    const todayIST = getTodayIST()
     const isManualMode = request.headers.get("x-manual-mode") === "true"
 
     // 3. FIND LATEST RECORD
+    // We specifically look for any open session for this member today or in general
+    // to handle the state machine logic for check-ins/check-outs.
     const latestRecord = await prisma.attendance.findFirst({
       where: { memberId: member.id },
       orderBy: { checkedInAt: "desc" },
@@ -100,6 +101,7 @@ export async function POST(request: Request) {
       autoReset: isManualMode ? true : undefined,
     }
 
+    const todayIST = getTodayIST()
     // Helper for date comparison
     const isSameDay = (d1: Date, d2: Date) => 
       d1.toISOString().split("T")[0] === d2.toISOString().split("T")[0]
