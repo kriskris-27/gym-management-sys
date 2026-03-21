@@ -36,10 +36,12 @@ export default function MembersPage() {
   const now = new Date()
   
   // Date Helpers
-  const formatDate = (isoString: string) => {
-    return new Date(isoString).toLocaleDateString('en-GB', {
-      day: 'numeric', month: 'short', year: 'numeric'
-    })
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return "-";
+    const datePart = dateStr.split("T")[0];
+    const [year, month, day] = datePart.split("-");
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`;
   }
   
   const getDaysDiff = (endDateStr: string) => {

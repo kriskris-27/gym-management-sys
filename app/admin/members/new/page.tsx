@@ -13,6 +13,7 @@ const schema = z.object({
   membershipType: z.enum([
     "MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "PERSONAL_TRAINING"
   ]),
+  customPrice: z.coerce.number().min(0, "Price cannot be negative").max(99999, "Price too high"),
   startDate: z.string().min(1, "Start date required"),
   endDate: z.string().optional()
 }).refine(data => {
@@ -33,9 +34,27 @@ export default function AddMemberPage() {
   const [success, setSuccess] = useState(false)
   const [generalError, setGeneralError] = useState("")
 
+  const [priceLoading, setPriceLoading] = useState(false)
+
   const getTodayStr = () => {
-    const today = new Date()
-    return today.toISOString().split("T")[0]
+    const now = new Date()
+    const istOffset = 5.5 * 60 * 60 * 1000
+    const istNow = new Date(now.getTime() + istOffset)
+    return istNow.toISOString().split("T")[0]
+  }
+
+  const fetchPlanPrice = async (type: string) => {
+    setPriceLoading(true)
+    try {
+      const res = await fetch("/api/settings/pricing")
+      const data = await res.json()
+      const plan = data.pricing?.find((p: any) => p.membershipType === type)
+      setValue("customPrice", plan?.amount ?? 0, { shouldValidate: false })
+    } catch {
+      setValue("customPrice", 0)
+    } finally {
+      setPriceLoading(false)
+    }
   }
 
   const {
@@ -46,9 +65,10 @@ export default function AddMemberPage() {
     setError,
     formState: { errors }
   } = useForm<FormData>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema) as any,
     defaultValues: {
       membershipType: "MONTHLY",
+      customPrice: 0,
       startDate: getTodayStr(),
       endDate: ""
     }
@@ -56,8 +76,17 @@ export default function AddMemberPage() {
 
   const startDate = watch("startDate")
   const membershipType = watch("membershipType")
+  const customPrice = watch("customPrice")
 
-  // Auto-calculate logic
+  // Auto-fetch plan price when membershipType changes
+  useEffect(() => {
+    if (membershipType) {
+      fetchPlanPrice(membershipType)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [membershipType])
+
+  // Auto-calculate end date
   useEffect(() => {
     if (membershipType !== "PERSONAL_TRAINING" && startDate) {
       const start = new Date(startDate)
@@ -197,6 +226,37 @@ export default function AddMemberPage() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
               </div>
             </div>
+          </div>
+
+          {/* FIELD 4: Plan Amount */}
+          <div>
+            <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-2">
+              Plan Amount
+            </label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#555555] text-[14px] font-medium select-none">₹</span>
+              <input
+                {...register("customPrice")}
+                type="number"
+                min="0"
+                max="99999"
+                placeholder="0"
+                className={`w-full bg-[#0F0F0F] border ${
+                  errors.customPrice ? 'border-[#D11F00]' : 'border-[#242424]'
+                } text-white text-[14px] rounded-lg pl-9 pr-4 py-3.5 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200`}
+              />
+              {priceLoading && (
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[#444444] text-[11px]">fetching...</span>
+              )}
+            </div>
+            {errors.customPrice && (
+              <p className="text-[#D11F00] text-[11px] mt-1.5 animate-error">{errors.customPrice.message as string}</p>
+            )}
+            {isPersonalTraining && !errors.customPrice ? (
+              <p className="text-[#D11F00] text-[11px] mt-1.5 italic">Set custom amount for this member</p>
+            ) : (
+              <p className="text-[#333333] text-[11px] mt-1.5 italic">Pre-filled from plan pricing. Edit to give discount.</p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">

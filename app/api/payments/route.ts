@@ -49,7 +49,7 @@ export async function GET(request: Request) {
       memberId: p.memberId,
       memberName: p.member.name,
       amount: p.amount,
-      date: p.date.toISOString().split('T')[0], // Standard format "YYYY-MM-DD"
+      date: p.date.toISOString(), // Raw full UTC format
       mode: p.mode,
       notes: p.notes
     }))
@@ -111,7 +111,7 @@ export async function POST(request: Request) {
         memberId: payment.memberId,
         memberName: payment.member.name,
         amount: payment.amount,
-        date: payment.date.toISOString().split('T')[0],
+        date: payment.date.toISOString(),
         mode: payment.mode,
         notes: payment.notes
       }

@@ -93,15 +93,22 @@ export async function POST(request: Request) {
       endDate.setDate(startDate.getDate() + daysToAdd)
     }
 
-    // Only allow customPrice for PERSONAL_TRAINING, otherwise force null explicitly
-    const customPrice = data.membershipType === "PERSONAL_TRAINING" 
-      ? (data.customPrice ?? null) 
-      : null
+    // Lock price at creation time — always store on member record
+    // If customPrice provided in body → use it
+    // Otherwise → fetch from PlanPricing table and store that
+    let lockedPrice: number = data.customPrice ?? -1
 
-    const member = await prisma.member.create({
+    if (lockedPrice < 0) {
+      const planPricing = await (prisma as any).planPricing.findUnique({
+        where: { membershipType: data.membershipType }
+      })
+      lockedPrice = planPricing?.amount ?? 0
+    }
+
+    const member = await (prisma as any).member.create({
       data: {
         ...data,
-        customPrice,
+        customPrice: lockedPrice,
         endDate,
         status: "ACTIVE",
       },

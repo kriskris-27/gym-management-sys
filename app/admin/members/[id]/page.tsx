@@ -26,6 +26,13 @@ interface AttendanceRecord {
   autoClosed: boolean
 }
 
+interface PaymentSummary {
+  dueAmount: number
+  totalPaid: number
+  remaining: number
+  isPaidFull: boolean
+}
+
 interface PaymentRecord {
   id: string
   amount: number
@@ -64,6 +71,7 @@ export default function MemberProfilePage() {
   const [member, setMember] = useState<Member | null>(null)
   const [attendance, setAttendance] = useState<{ records: AttendanceRecord[], total: number }>({ records: [], total: 0 })
   const [payments, setPayments] = useState<PaymentRecord[]>([])
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null)
   
   const [tab, setTab] = useState<"ATTENDANCE" | "PAYMENTS">("ATTENDANCE")
   const [attendancePage, setAttendancePage] = useState(1)
@@ -76,9 +84,10 @@ export default function MemberProfilePage() {
   // Fetch logic
   const fetchMemberData = async () => {
     try {
-      const [memRes, payRes] = await Promise.all([
+      const [memRes, payRes, sumRes] = await Promise.all([
         fetch(`/api/members/${id}`),
-        fetch(`/api/payments?memberId=${id}`)
+        fetch(`/api/payments?memberId=${id}`),
+        fetch(`/api/payments/summary/${id}`)
       ])
       
       if (memRes.status === 404) {
@@ -95,8 +104,15 @@ export default function MemberProfilePage() {
         const payData = await payRes.json()
         setPayments(payData.payments)
       }
+      if (sumRes.ok) {
+        const summaryData = await sumRes.json()
+        setPaymentSummary(summaryData)
+      } else {
+        setPaymentSummary({ dueAmount: 0, totalPaid: 0, remaining: 0, isPaidFull: true })
+      }
     } catch (e) {
       console.error(e)
+      setPaymentSummary({ dueAmount: 0, totalPaid: 0, remaining: 0, isPaidFull: true })
     } finally {
       setLoading(false)
     }
@@ -128,7 +144,12 @@ export default function MemberProfilePage() {
   }, [attendancePage])
 
   // Payment Form Hook
-  const getTodayStr = () => new Date().toISOString().split("T")[0]
+  const getTodayStr = () => {
+    const now = new Date()
+    const istOffset = 5.5 * 60 * 60 * 1000
+    const istNow = new Date(now.getTime() + istOffset)
+    return istNow.toISOString().split("T")[0]
+  }
   const { register: regPayment, handleSubmit: handlePaymentSubmit, reset: resetPayment, formState: { errors: payErrors, isSubmitting: isPaying } } = useForm<PaymentFormData>({
     resolver: zodResolver(paymentSchema) as any,
     defaultValues: { date: getTodayStr(), mode: "UPI" as any }
@@ -217,7 +238,13 @@ export default function MemberProfilePage() {
       case "PERSONAL_TRAINING": return "Personal Training"; default: return plan;
     }
   }
-  const formatDate = (isoStr: string) => new Date(isoStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return "-";
+    const datePart = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr.split(" ")[0];
+    const [year, month, day] = datePart.split("-");
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`;
+  }
   const formatTime = (isoStr: string) => new Date(isoStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
 
   if (loading) {
@@ -334,6 +361,59 @@ export default function MemberProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* PAYMENT SUMMARY CARD */}
+      {paymentSummary ? (
+        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-3 gap-4 animate-fade z-10 relative">
+          {/* CELL 1 */}
+          <div className="border-r border-[#1C1C1C] pr-4">
+            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Due Amount</p>
+            {paymentSummary.dueAmount === 0 ? (
+              <p className="text-white text-[24px] font-black">Free Plan</p>
+            ) : (
+              <p className="text-white text-[24px] font-black">₹{paymentSummary.dueAmount.toLocaleString('en-IN')}</p>
+            )}
+            <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">for {formatPlan(member.membershipType)} plan</p>
+          </div>
+          
+          {/* CELL 2 */}
+          <div className="border-r border-[#1C1C1C] px-4">
+            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Total Paid</p>
+            <p className="text-[#10B981] text-[24px] font-black">₹{paymentSummary.totalPaid.toLocaleString('en-IN')}</p>
+            {paymentSummary.totalPaid === 0 ? (
+              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">No payments yet</p>
+            ) : (
+              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">{payments.length} payment{payments.length === 1 ? '' : 's'}</p>
+            )}
+          </div>
+          
+          {/* CELL 3 */}
+          <div className="pl-4">
+            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Remaining</p>
+            {paymentSummary.remaining > 0 ? (
+              <p className="text-[#D11F00] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹{paymentSummary.remaining.toLocaleString('en-IN')}</p>
+            ) : paymentSummary.remaining === 0 ? (
+              <p className="text-[#10B981] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹0</p>
+            ) : (
+              <p className="text-[#F59E0B] text-[24px] font-black leading-none pb-1.5 pt-0.5">Overpaid ₹{Math.abs(paymentSummary.remaining).toLocaleString('en-IN')}</p>
+            )}
+            
+            <div className="mt-1">
+              {paymentSummary.isPaidFull ? (
+                <span className="inline-block bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20 text-[11px] px-2 py-0.5 rounded-md font-medium tracking-wide">Fully Paid ✓</span>
+              ) : (
+                <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] border border-[#D11F00]/20 text-[11px] px-2 py-0.5 rounded-md font-medium tracking-wide">₹{paymentSummary.remaining.toLocaleString('en-IN')} pending</span>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-3 gap-4 z-10 relative">
+          <div className="border-r border-[#1C1C1C] pr-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
+          <div className="border-r border-[#1C1C1C] px-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
+          <div className="pl-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
+        </div>
+      )}
 
       {/* TABS */}
       <div className="mt-8 flex gap-6 animate-fade">
