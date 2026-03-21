@@ -2,33 +2,8 @@ import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { AttendanceScanSchema } from "@/lib/validations"
 
-/**
- * IST Helpers with precise UTC-to-IST day boundaries
- */
-function getISTDateRange() {
-  const now = new Date()
-  const istOffset = 5.5 * 60 * 60 * 1000
-  const istNow = new Date(now.getTime() + istOffset)
-  const istDateStr = istNow.toISOString().split("T")[0] // e.g. "2026-03-21"
-  
-  // IST midnight = UTC 18:30 of previous day
-  const startOfTodayIST = new Date(istDateStr + "T00:00:00+05:30")
-  const startOfTomorrowIST = new Date(startOfTodayIST.getTime() + 24 * 60 * 60 * 1000)
-  
-  return { startOfTodayIST, startOfTomorrowIST, istDateStr }
-}
+import { getISTDateRange, calcDuration, formatDuration } from "@/lib/utils"
 
-function calcDuration(start: Date, end: Date): number {
-  return Math.floor((end.getTime() - start.getTime()) / 60000)
-}
-
-function formatDuration(minutes: number): string {
-  const hrs = Math.floor(minutes / 60)
-  const mins = minutes % 60
-  if (hrs === 0) return `${mins}min`
-  if (mins === 0) return `${hrs}hr`
-  return `${hrs}hr ${mins}min`
-}
 
 const rateLimitMap = new Map<string, { count: number; start: number }>()
 

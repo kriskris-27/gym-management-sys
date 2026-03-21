@@ -18,7 +18,7 @@ const PUBLIC_ROUTES = [
  */
 const EXCLUDE_PREFIXES = ["/_next", "/images", "/favicon.ico"]
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // 1. Skip middleware for exclude prefixes and public routes

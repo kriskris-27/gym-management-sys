@@ -1,17 +1,49 @@
-import { PrismaClient } from '../prisma/client'
+import { PrismaClient } from "@prisma/client"
+import { PrismaNeon } from "@prisma/adapter-neon"
+import { neonConfig, Pool } from "@neondatabase/serverless"
 
-const prismaClientSingleton = () => {
-  return new PrismaClient()
+// Configure WebSocket for local development environments
+if (process.env.NODE_ENV === "development") {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const ws = require("ws")
+  neonConfig.webSocketConstructor = ws
 }
 
-// In Next.js development, we want to persist the same PrismaClient instance
-// so we don't exhaust your database connection pool during hot-reloads.
-declare const globalThis: {
-  prismaGlobal: ReturnType<typeof prismaClientSingleton>;
-} & typeof global;
+const globalForPrisma = global as unknown as {
+  prisma: PrismaClient
+}
 
-const prisma = globalThis.prismaGlobal ?? prismaClientSingleton()
+/**
+ * Creates a new Prisma client instance using Neon's serverless HTTP/WebSocket adapter.
+ * Optimized for serverless deployments and cold-start resistance.
+ */
+function createPrismaClient() {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL!,
+  })
+  const adapter = new PrismaNeon(pool)
+  return new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["error"] : [],
+  })
+}
+
+export const prisma =
+  globalForPrisma.prisma ?? createPrismaClient()
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma
+}
 
 export default prisma
 
-if (process.env.NODE_ENV !== 'production') globalThis.prismaGlobal = prisma
+/**
+ * Health check utility
+ */
+export async function pingDB() {
+  try {
+    await prisma.$queryRaw`SELECT 1`
+  } catch {
+    // Silent fail
+  }
+}

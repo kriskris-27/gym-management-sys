@@ -48,7 +48,12 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" },
     })
 
-    return NextResponse.json({ members })
+    return NextResponse.json({ members }, {
+      headers: {
+        "Cache-Control": "s-maxage=60, stale-while-revalidate",
+      },
+    })
+
 
   } catch (error) {
     return NextResponse.json({ error: "Could not retrieve members" }, { status: 500 })
