@@ -35,12 +35,20 @@ export async function GET() {
       paymentAggregate,
       failedNotifs
     ] = await Promise.all([
-      // A. Active Attendance (For headcount)
+      // A. Active Attendance (For headcount & table)
       prisma.attendance.findMany({
         where: {
           checkedInAt: { gte: startOfTodayIST, lt: startOfTomorrowIST }
         },
-        select: { memberId: true, checkedOutAt: true }
+        select: { 
+          memberId: true, 
+          checkedInAt: true, 
+          checkedOutAt: true,
+          durationMinutes: true,
+          autoClosed: true,
+          member: { select: { name: true } }
+        },
+        orderBy: { checkedInAt: 'desc' }
       }),
       
       // B. Membership Distribution
@@ -108,7 +116,15 @@ export async function GET() {
       today: {
         date: istDateStr,
         totalPresent,
-        currentlyInside
+        currentlyInside,
+        attendance: todayAttendance.map(a => ({
+          memberId: a.memberId,
+          memberName: a.member.name,
+          checkedInAt: a.checkedInAt.toISOString(),
+          checkedOutAt: a.checkedOutAt?.toISOString() || null,
+          durationMinutes: a.durationMinutes,
+          autoClosed: a.autoClosed
+        }))
       },
       members: membersResponse,
       payments: {

@@ -1,4 +1,4 @@
-import { PrismaClient } from "./client"
+import { PrismaClient } from "@prisma/client"
 
 import bcrypt from "bcryptjs"
 
@@ -15,6 +15,23 @@ async function main() {
       password: hashedPassword,
     },
   })
+
+  const defaultPrices = [
+    { membershipType: "MONTHLY",           amount: 1000 },
+    { membershipType: "QUARTERLY",         amount: 2500 },
+    { membershipType: "HALF_YEARLY",       amount: 4500 },
+    { membershipType: "ANNUAL",            amount: 8000 },
+    { membershipType: "PERSONAL_TRAINING", amount: 0    },
+  ] as const
+
+  for (const price of defaultPrices) {
+    await prisma.planPricing.upsert({
+      where:  { membershipType: price.membershipType },
+      update: { amount: price.amount },
+      create: price,
+    })
+  }
+  console.log("✅ Default plan prices seeded")
 
   console.log("✅ Owner account created")
   console.log("   Username: admin")

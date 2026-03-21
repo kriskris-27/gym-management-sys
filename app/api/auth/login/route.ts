@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
     // 5. SUCCESS → GENERATE JWT
     const token = await signToken({
-      id: owner.id,
+      ownerId: owner.id,
       username: owner.username,
     })
 

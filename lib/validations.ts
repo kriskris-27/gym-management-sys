@@ -49,8 +49,11 @@ export const MemberCreateSchema = z.object({
   membershipType: MembershipTypeEnum,
   startDate: z.coerce.date(),
   endDate: z.coerce.date().optional(),
-
   status: MemberStatusEnum.default("ACTIVE"),
+  customPrice: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined) ? null : Number(val),
+    z.number().min(0, "Custom price cannot be negative").max(99999, "Custom price too high").nullable().optional()
+  ),
 }).strict()
 .refine((data) => {
   if (data.endDate && data.startDate && data.endDate <= data.startDate) return false;
@@ -87,6 +90,10 @@ export const MemberUpdateSchema = z.object({
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
   status: MemberStatusEnum.optional(),
+  customPrice: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined) ? null : Number(val),
+    z.number().min(0, "Custom price cannot be negative").max(99999, "Custom price too high").nullable().optional()
+  ),
 }).strict()
 .refine((data) => {
   if (data.endDate && data.startDate && data.endDate <= data.startDate) return false;
@@ -136,3 +143,19 @@ export const DateRangeSchema = z.object({
   message: "End date must be after or equal to start date",
   path: ["endDate"],
 });
+
+/**
+ * Settings & Pricing
+ */
+export const PricingItemSchema = z.object({
+  membershipType: MembershipTypeEnum,
+  amount: z.coerce.number()
+    .min(0, "Amount cannot be negative")
+    .max(99999, "Amount too large")
+}).strict();
+
+export const PricingUpdateSchema = z.object({
+  pricing: z.array(PricingItemSchema)
+    .min(1, "At least one plan required")
+    .max(5, "Maximum 5 plans allowed")
+}).strict();

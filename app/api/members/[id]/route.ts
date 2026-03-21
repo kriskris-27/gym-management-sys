@@ -35,11 +35,42 @@ export async function GET(
 
     const { _count, attendance, ...memberData } = member
 
+    let planPrice = 0
+    if (member.customPrice !== null && member.customPrice !== undefined) {
+      planPrice = member.customPrice
+    } else {
+      const dbPrice = await prisma.planPricing.findUnique({
+        where: { membershipType: member.membershipType }
+      })
+      planPrice = dbPrice?.amount || 0
+    }
+
+    const paymentsAggregate = await prisma.payment.aggregate({
+      where: {
+        memberId: member.id,
+        date: {
+          gte: member.startDate,
+          lte: member.endDate
+        }
+      },
+      _sum: {
+        amount: true
+      }
+    })
+
+    const totalPaid = paymentsAggregate._sum.amount || 0
+    const remaining = planPrice - totalPaid
+    const isPaidFull = remaining <= 0
+
     return NextResponse.json({
       member: {
         ...memberData,
         attendanceCount: _count.attendance,
         lastVisited: attendance[0]?.checkedInAt || null,
+        dueAmount: planPrice,
+        totalPaid,
+        remaining,
+        isPaidFull
       },
     })
   } catch (error) {

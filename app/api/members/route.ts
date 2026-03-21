@@ -74,8 +74,6 @@ export async function POST(request: Request) {
       }, { status: 400 })
     }
 
-
-
     const data = validated.data
     const startDate = new Date(data.startDate)
     let endDate: Date
@@ -95,9 +93,15 @@ export async function POST(request: Request) {
       endDate.setDate(startDate.getDate() + daysToAdd)
     }
 
+    // Only allow customPrice for PERSONAL_TRAINING, otherwise force null explicitly
+    const customPrice = data.membershipType === "PERSONAL_TRAINING" 
+      ? (data.customPrice ?? null) 
+      : null
+
     const member = await prisma.member.create({
       data: {
         ...data,
+        customPrice,
         endDate,
         status: "ACTIVE",
       },

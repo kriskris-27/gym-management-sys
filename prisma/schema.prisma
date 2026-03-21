@@ -1,7 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
-  output          = "../node_modules/.prisma/client"
 }
 
 
@@ -23,6 +22,13 @@ model Owner {
   createdAt DateTime @default(now())
 }
 
+model PlanPricing {
+  id             String         @id @default(cuid())
+  membershipType MembershipType @unique
+  amount         Float
+  updatedAt      DateTime       @updatedAt
+}
+
 model Member {
   id             String         @id @default(cuid())
   name           String
@@ -30,6 +36,7 @@ model Member {
   membershipType MembershipType
   startDate      DateTime
   endDate        DateTime
+  customPrice    Float?
   status         MemberStatus   @default(ACTIVE)
   createdAt      DateTime       @default(now())
 

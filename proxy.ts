@@ -33,7 +33,9 @@ export async function proxy(request: NextRequest) {
   const token = request.cookies.get(AUTH_COOKIE)?.value
 
   // 3. Unauthorized access check
-  if (!token || !(await verifyToken(token))) {
+  const payload = token ? await verifyToken(token) : null
+
+  if (!payload || !payload.ownerId) {
     // API route protection → Hard 401 without leaking why
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -61,16 +63,14 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     "/admin/:path*",
-    "/api/members",
     "/api/members/:path*",
     "/api/attendance/today",
-    "/api/attendance/:memberId",
-    "/api/dashboard",
+    "/api/attendance/:path*",
     "/api/dashboard/:path*",
-    "/api/payments",
     "/api/payments/:path*",
-    "/api/reports",
     "/api/reports/:path*",
-
+    "/api/settings/:path*",
+    "/api/auth/logout",
+    "/api/cron/:path*",
   ],
 }
