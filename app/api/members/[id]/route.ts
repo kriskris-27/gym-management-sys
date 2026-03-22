@@ -168,3 +168,126 @@ export async function PUT(
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
   }
 }
+/**
+ * DELETE: Soft delete a member (mark as DELETED)
+ * Logic: Sets status to DELETED instead of hard delete
+ */
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params
+
+    const member = await prisma.member.findUnique({
+      where: { id }
+    })
+
+    if (!member || member.status === "DELETED") {
+      return NextResponse.json(
+        { error: "Member not found" },
+        { status: 404 }
+      )
+    }
+
+    await prisma.member.update({
+      where: { id },
+      data: { status: "DELETED" }
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * PATCH: Renewal handler for extending membership
+ * Logic: Supports renewing with optional membership type change
+ */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params
+    const body = await request.json()
+
+    const member = await prisma.member.findUnique({
+      where: { id }
+    })
+
+    if (!member || member.status === "DELETED") {
+      return NextResponse.json(
+        { error: "Member not found" },
+        { status: 404 }
+      )
+    }
+
+    // CASE 1: Renewal
+    // body = { action: "renew", membershipType, startDate, customPrice }
+    if (body.action === "renew") {
+      const daysMap: Record<string, number> = {
+        MONTHLY: 30,
+        QUARTERLY: 90,
+        HALF_YEARLY: 180,
+        ANNUAL: 365,
+      }
+
+      const type = body.membershipType ?? member.membershipType
+      const start = body.startDate 
+        ? new Date(body.startDate) 
+        : new Date()
+
+      let end: Date
+      if (type === "PERSONAL_TRAINING") {
+        if (!body.endDate) {
+          return NextResponse.json(
+            { error: "End date required for Personal Training" },
+            { status: 400 }
+          )
+        }
+        end = new Date(body.endDate)
+      } else {
+        end = new Date(start)
+        end.setDate(start.getDate() + daysMap[type])
+      }
+
+      // Get new price if not provided
+      let newPrice = body.customPrice
+      if (newPrice === undefined || newPrice === null) {
+        const planPricing = await prisma.planPricing.findUnique({
+          where: { membershipType: type }
+        })
+        newPrice = planPricing?.amount ?? 0
+      }
+
+      const updated = await prisma.member.update({
+        where: { id },
+        data: {
+          membershipType: type,
+          startDate: start,
+          endDate: end,
+          customPrice: newPrice,
+          status: "ACTIVE"  // always reactivate on renewal
+        }
+      })
+
+      return NextResponse.json({ member: updated })
+    }
+
+    return NextResponse.json(
+      { error: "Invalid action" },
+      { status: 400 }
+    )
+
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    )
+  }
+}

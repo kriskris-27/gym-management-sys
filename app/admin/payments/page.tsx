@@ -212,6 +212,8 @@ export default function PaymentsPage() {
         queryClient.invalidateQueries({ queryKey: ["payments"] })
         queryClient.invalidateQueries({ queryKey: ["payments", "summary", selectedMember.id] })
         queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+        queryClient.invalidateQueries({ queryKey: ["members"] })
+        queryClient.invalidateQueries({ queryKey: ["member", selectedMember.id] })
         setTimeout(() => {
           setShowModal(false)
           resetModal()

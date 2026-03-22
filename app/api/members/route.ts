@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { MemberCreateSchema } from "@/lib/validations"
-// Pointing to local generated client for Prisma types
-import { Prisma } from "@prisma/client"
-
 
 /**
  * GET: List all members with filtering and search
@@ -43,12 +40,60 @@ export async function GET(request: Request) {
         startDate: true,
         endDate: true,
         status: true,
+        customPrice: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
     })
 
-    return NextResponse.json({ members }, {
+    // Fetch all plan prices once
+    const planPrices = await (prisma as any).planPricing.findMany()
+    const priceMap = Object.fromEntries(
+      planPrices.map((p: any) => [p.membershipType, p.amount])
+    )
+
+    const memberIds = members.map((m) => m.id)
+    const periodPayments =
+      memberIds.length > 0
+        ? await prisma.payment.findMany({
+            where: { memberId: { in: memberIds } },
+            select: { memberId: true, amount: true, date: true },
+          })
+        : []
+
+    const enriched = members.map((m) => {
+      const totalPaid = periodPayments
+        .filter(
+          (p) =>
+            p.memberId === m.id &&
+            p.date >= m.startDate &&
+            p.date <= m.endDate
+        )
+        .reduce((sum, p) => sum + p.amount, 0)
+
+      const dueAmount = m.customPrice !== null && m.customPrice !== undefined
+        ? m.customPrice
+        : (priceMap[m.membershipType] ?? 0)
+      const remaining = dueAmount - totalPaid
+      const isPaidFull = remaining <= 0
+
+      return {
+        id: m.id,
+        name: m.name,
+        phone: m.phone,
+        membershipType: m.membershipType,
+        startDate: m.startDate,
+        endDate: m.endDate,
+        status: m.status,
+        createdAt: m.createdAt,
+        totalPaid,
+        dueAmount,
+        remaining,
+        isPaidFull,
+      }
+    })
+
+    return NextResponse.json({ members: enriched }, {
       headers: {
         "Cache-Control": "s-maxage=60, stale-while-revalidate",
       },

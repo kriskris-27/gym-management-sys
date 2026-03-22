@@ -12,6 +12,8 @@ interface Member {
   startDate: string
   endDate: string
   status: "ACTIVE" | "INACTIVE" | "DELETED"
+  isPaidFull: boolean
+  dueAmount: number
 }
 
 export default function MembersPage() {
@@ -19,6 +21,7 @@ export default function MembersPage() {
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("All")
   const [planFilter, setPlanFilter] = useState("All Plans")
+  const [paymentFilter, setPaymentFilter] = useState("All Payments")
 
   const { data: rawData, isLoading: loading } = useMembers()
   const members: Member[] = rawData?.members ?? []
@@ -65,7 +68,9 @@ export default function MembersPage() {
     return acc
   }, {} as Record<string, number>)
 
-  const filtered = members.filter(m => {
+  // Use filtered list but without payment filter applied
+  // so counts show how many in current view are paid/unpaid
+  const filteredWithoutPayment = members.filter(m => {
     const isExpired = new Date(m.endDate) < now
 
     const matchesSearch =
@@ -73,16 +78,35 @@ export default function MembersPage() {
       m.phone.includes(search)
 
     const matchesStatus =
-      statusFilter === "All" ? true :
-      statusFilter === "Active" ? m.status === "ACTIVE" && !isExpired :
-      statusFilter === "Inactive" ? m.status === "INACTIVE" :
-      statusFilter === "Expired" ? isExpired : true
+      statusFilter === "All" ? m.status !== "DELETED" :
+      statusFilter === "Active" ? !isExpired && m.status === "ACTIVE" :
+      statusFilter === "Expired" ? isExpired :
+      statusFilter === "Deleted" ? m.status === "DELETED" :
+      true
 
     const matchesPlan =
       planFilter === "All Plans" ? true :
       m.membershipType === planMap[planFilter]
 
     return matchesSearch && matchesStatus && matchesPlan
+  })
+
+  const paidCount = filteredWithoutPayment.filter(
+    m => m.isPaidFull
+  ).length
+  const unpaidCount = filteredWithoutPayment.filter(
+    m => !m.isPaidFull && m.dueAmount > 0
+  ).length
+
+  const filtered = filteredWithoutPayment.filter(m => {
+    // Payment filter
+    const matchesPayment =
+      paymentFilter === "All Payments" ? true :
+      paymentFilter === "Paid" ? m.isPaidFull :
+      paymentFilter === "Unpaid" ? !m.isPaidFull :
+      true
+
+    return matchesPayment
   })
 
   return (
@@ -125,7 +149,7 @@ export default function MembersPage() {
 
         {/* Status Filter Tabs */}
         <div className="flex bg-[#111111] border border-[#1C1C1C] rounded-lg p-1 overflow-x-auto max-w-full">
-          {["All", "Active", "Inactive", "Expired"].map(tab => (
+          {["All", "Active", "Expired", "Deleted"].map(tab => (
             <button
               key={tab}
               onClick={() => setStatusFilter(tab)}
@@ -140,6 +164,36 @@ export default function MembersPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* PAYMENT FILTER ROW */}
+      <div className="mt-3 flex gap-2 flex-wrap">
+        {["All Payments", "Paid", "Unpaid"].map(tab => {
+          const isActive = paymentFilter === tab
+          const count = 
+            tab === "Paid" ? paidCount :
+            tab === "Unpaid" ? unpaidCount :
+            null
+          return (
+            <button
+              key={tab}
+              onClick={() => setPaymentFilter(tab)}
+              className={`
+                px-4 py-2 rounded-lg text-[12px] font-medium transition-all duration-200 cursor-pointer border
+                ${isActive
+                  ? "bg-[#1C1C1C] text-white border-[#2A2A2A]"
+                  : "bg-[#111111] text-[#444444] border-[#1C1C1C] hover:text-[#888888]"}
+              `}
+            >
+              {tab}
+              {count !== null && count > 0 && (
+                <span className={`ml-1.5 text-[10px] ${isActive ? "text-[#888888]" : "text-[#444444]"}`}>
+                  ({count})
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* PLAN FILTER ROW */}
@@ -209,28 +263,40 @@ export default function MembersPage() {
                   const daysLeft = getDaysDiff(member.endDate)
                   const isExpiringSoon = daysLeft >= 0 && daysLeft <= 7
                   const initial = member.name.charAt(0).toUpperCase()
+                  const remaining = member.dueAmount
 
-                  // Status badge logic
-                  let statusBadge = null
-                  if (isExpired) {
-                    statusBadge = (
-                      <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">
-                        Expired
-                      </span>
-                    )
-                  } else if (member.status === "ACTIVE") {
-                    statusBadge = (
-                      <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">
-                        Active
-                      </span>
-                    )
-                  } else {
-                    statusBadge = (
-                      <span className="inline-block bg-[#1C1C1C] text-[#555555] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#2A2A2A]">
-                        Inactive
-                      </span>
-                    )
-                  }
+                  // Membership status badge
+                  const membershipBadge = isExpired ? (
+                    <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">
+                      Expired
+                    </span>
+                  ) : (
+                    <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">
+                      Active
+                    </span>
+                  )
+
+                  // Payment status badge
+                  const paymentBadge = member.isPaidFull ? (
+                    <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">
+                      Paid
+                    </span>
+                  ) : remaining === 0 ? (
+                    <span className="inline-block bg-[#1C1C1C] text-[#555555] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#2A2A2A]">
+                      Free
+                    </span>
+                  ) : (
+                    <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">
+                      ₹{remaining.toLocaleString('en-IN')} due
+                    </span>
+                  )
+
+                  const statusBadge = (
+                    <div className="flex gap-1.5 flex-wrap">
+                      {membershipBadge}
+                      {paymentBadge}
+                    </div>
+                  )
 
                   // Plan badge logic
                   const isPremiumPlan = member.membershipType === "ANNUAL"

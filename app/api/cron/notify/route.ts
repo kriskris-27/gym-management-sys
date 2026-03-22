@@ -27,10 +27,56 @@ export async function POST(request: Request) {
   const stats = {
     expiry5Day: { sent: 0, skipped: 0, failed: 0 },
     expiry1Day: { sent: 0, skipped: 0, failed: 0 },
-    inactivity: { sent: 0, skipped: 0, failed: 0 }
+    inactivity: { sent: 0, skipped: 0, failed: 0 },
+    statusUpdates: { deactivated: 0, reactivated: 0 }
   }
 
   try {
+    // JOB C: AUTO STATUS UPDATE (RUNS FIRST)
+    // This must execute before expiry notifications to prevent notifying newly deactivated members
+
+    // STEP 1: Auto set INACTIVE for expired members
+    const expiredMembers = await prisma.member.findMany({
+      where: {
+        status: "ACTIVE",
+        endDate: { lt: now }
+      },
+      select: { id: true, name: true }
+    })
+
+    if (expiredMembers.length > 0) {
+      await prisma.member.updateMany({
+        where: {
+          id: { in: expiredMembers.map(m => m.id) }
+        },
+        data: { status: "INACTIVE" }
+      })
+      stats.statusUpdates.deactivated = expiredMembers.length
+      console.log(`✅ Auto-deactivated ${expiredMembers.length} expired members`)
+    }
+
+    // STEP 2: Auto set ACTIVE for renewed members
+    // (members marked INACTIVE but endDate is now in future)
+    // This handles case where owner manually extended dates
+    const renewedMembers = await prisma.member.findMany({
+      where: {
+        status: "INACTIVE",
+        endDate: { gt: now }
+      },
+      select: { id: true, name: true }
+    })
+
+    if (renewedMembers.length > 0) {
+      await prisma.member.updateMany({
+        where: {
+          id: { in: renewedMembers.map(m => m.id) }
+        },
+        data: { status: "ACTIVE" }
+      })
+      stats.statusUpdates.reactivated = renewedMembers.length
+      console.log(`✅ Auto-reactivated ${renewedMembers.length} renewed members`)
+    }
+
     // PREPARE TIME WINDOWS (IST BOUNDED)
     // Expiry targets are checked against IST day starts
     const fiveDayTargetStart = new Date(startOfTodayIST.getTime() + 5 * 24 * 60 * 60 * 1000)
@@ -143,7 +189,14 @@ export async function POST(request: Request) {
       } catch (e) { stats.inactivity.failed++; }
     }
 
-    return NextResponse.json({ success: true, processed: stats })
+    return NextResponse.json({ 
+      success: true, 
+      processed: stats,
+      statusUpdates: { 
+        deactivated: stats.statusUpdates.deactivated,
+        reactivated: stats.statusUpdates.reactivated
+      }
+    })
 
   } catch (error) {
     console.error("❌ CRON Execution Failure:", error)

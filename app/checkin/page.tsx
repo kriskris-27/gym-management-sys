@@ -11,6 +11,7 @@ type CheckinStatus =
   | "checked_out"
   | "already_done"
   | "not_found"
+  | "inactive"
   | "error"
 
 type ScanResult = {
@@ -74,6 +75,14 @@ function CheckinContent() {
         if (res.status === 404 && data.status === "NOT_FOUND") {
           localStorage.removeItem(STORAGE_KEY)
           setStatus("not_found")
+          return
+        }
+
+        if (data.status === "INACTIVE") {
+          // Don't clear localStorage — phone is valid
+          // member just needs to renew
+          setResult(data as ScanResult)
+          setStatus("inactive")
           return
         }
 
@@ -429,6 +438,38 @@ function CheckinContent() {
               Resetting in {manualCountdown}s...
             </p>
           ) : null}
+        </div>
+      )}
+
+      {/* STATE: inactive — Membership Expired */}
+      {status === "inactive" && result && (
+        <div className="checkin-state flex w-full max-w-[360px] flex-col items-center text-center">
+          <div className="checkin-circle flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#F59E0B] bg-[#F59E0B]/10">
+            <span className="text-[36px] text-[#F59E0B]">⏰</span>
+          </div>
+          <h2 className="mt-4 text-[26px] font-black text-white">
+            Membership Expired
+          </h2>
+          <p className="mt-2 text-[14px] text-[#666666]">
+            Hi {result?.memberName}
+          </p>
+
+          <div className="mt-6 w-full rounded-xl border border-[#F59E0B]/20 bg-[#F59E0B]/10 px-5 py-4">
+            <p className="text-center text-[13px] font-medium text-[#F59E0B]">
+              Your membership has expired.
+            </p>
+            <p className="mt-1 text-center text-[12px] text-[#888888]">
+              Please contact your gym owner to renew.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleNotYou}
+            className="mt-8 text-[11px] text-[#333333] transition-colors hover:text-[#666666]"
+          >
+            Not you?
+          </button>
         </div>
       )}
 

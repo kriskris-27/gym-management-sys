@@ -105,6 +105,49 @@ export async function POST(request: Request) {
       }
     })
 
+    // 3. Update Member if Expired and Now Fully Paid
+    const isExpired = new Date(member.endDate) < new Date()
+    if (isExpired) {
+      const paymentsSum = await prisma.payment.aggregate({
+        where: { 
+          memberId: member.id,
+          date: {
+            gte: member.startDate,
+            lte: member.endDate
+          }
+        },
+        _sum: { amount: true }
+      })
+
+      const totalPaid = paymentsSum._sum.amount ?? 0
+      const dbPrice = await prisma.planPricing.findUnique({
+        where: { membershipType: member.membershipType }
+      })
+      const planPrice = member.customPrice ?? dbPrice?.amount ?? 0
+
+      if (totalPaid >= planPrice) {
+        // Member has paid in full for expired period - extend membership by the plan duration
+        const durationDays: Record<string, number> = {
+          "MONTHLY": 30,
+          "QUARTERLY": 90,
+          "HALF_YEARLY": 180,
+          "ANNUAL": 365,
+          "PERSONAL_TRAINING": 30
+        }
+        const membershipDurationDays = durationDays[member.membershipType] || 30
+        const newEndDate = new Date(member.endDate)
+        newEndDate.setDate(newEndDate.getDate() + membershipDurationDays)
+
+        await prisma.member.update({
+          where: { id: member.id },
+          data: { 
+            status: "ACTIVE",
+            endDate: newEndDate
+          }
+        })
+      }
+    }
+
     return NextResponse.json({
       payment: {
         id: payment.id,

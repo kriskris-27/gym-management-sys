@@ -41,6 +41,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: "NOT_FOUND", message: "Phone not registered." }, { status: 404 })
     }
 
+    if (member.status === "INACTIVE") {
+      return NextResponse.json({
+        status: "INACTIVE",
+        memberName: member.name,
+        isExpired: true,
+        message: "Your membership has expired. Please renew to continue.",
+        checkedInAt: null,
+        checkedOutAt: null,
+        durationMinutes: null,
+        durationFormatted: null,
+        autoReset: request.headers.get("x-manual-mode") === "true"
+      })
+    }
+
     const { startOfTodayIST, startOfTomorrowIST } = getISTDateRange()
     const isExpired = now > new Date(member.endDate)
 
