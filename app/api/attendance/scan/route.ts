@@ -63,7 +63,12 @@ export async function POST(request: Request) {
       await prisma.attendance.create({
         data: { memberId: member.id, date: startOfTodayIST, checkedInAt: now },
       })
-      return NextResponse.json({ ...baseResult, status: "CHECKED_IN", message: `Welcome, ${member.name}! ✅` })
+      return NextResponse.json({
+        ...baseResult,
+        status: "CHECKED_IN",
+        message: `Welcome, ${member.name}! ✅`,
+        checkedInAt: now.toISOString(),
+      })
     }
 
     // CASE: Open record from PREVIOUS day (Forgot to check out)
@@ -75,16 +80,29 @@ export async function POST(request: Request) {
       await prisma.attendance.create({
         data: { memberId: member.id, date: startOfTodayIST, checkedInAt: now },
       })
-      return NextResponse.json({ ...baseResult, status: "CHECKED_IN", message: `Welcome, ${member.name}! ✅` })
+      return NextResponse.json({
+        ...baseResult,
+        status: "CHECKED_IN",
+        message: `Welcome, ${member.name}! ✅`,
+        checkedInAt: now.toISOString(),
+      })
     }
 
     // CASE: We have a record for TODAY
     if (isLatestToday) {
       if (latestRecord.checkedOutAt) {
+        const out = latestRecord.checkedOutAt
+        const dur =
+          latestRecord.durationMinutes ??
+          calcDuration(latestRecord.checkedInAt, out)
         return NextResponse.json({
           ...baseResult,
           status: "ALREADY_DONE",
           message: `Already completed today's session, ${member.name}!`,
+          checkedInAt: latestRecord.checkedInAt.toISOString(),
+          checkedOutAt: out.toISOString(),
+          durationMinutes: dur,
+          durationFormatted: formatDuration(dur),
         })
       }
 
@@ -100,6 +118,10 @@ export async function POST(request: Request) {
           ...baseResult,
           status: "CHECKED_OUT",
           message: `Goodbye, ${member.name}! You stayed for ${formatDuration(gap)} 💪`,
+          checkedInAt: latestRecord.checkedInAt.toISOString(),
+          checkedOutAt: now.toISOString(),
+          durationMinutes: gap,
+          durationFormatted: formatDuration(gap),
         })
       } else { // >= 4 hours → Auto-close + New Session
         await prisma.attendance.update({
@@ -109,7 +131,12 @@ export async function POST(request: Request) {
         await prisma.attendance.create({
           data: { memberId: member.id, date: startOfTodayIST, checkedInAt: now },
         })
-        return NextResponse.json({ ...baseResult, status: "CHECKED_IN", message: `Welcome, ${member.name}! ✅` })
+        return NextResponse.json({
+          ...baseResult,
+          status: "CHECKED_IN",
+          message: `Welcome, ${member.name}! ✅`,
+          checkedInAt: now.toISOString(),
+        })
       }
     }
 

@@ -43,7 +43,7 @@ export async function GET(request: Request) {
       // Financials in range
       prisma.payment.findMany({
         where: { date: { gte: startOfMonth, lt: startOfNextMonth } },
-        include: { member: { select: { membershipType: true } } }
+        include: { member: { select: { membershipType: true, createdAt: true } } }
       }),
       // Traffic in range
       prisma.attendance.findMany({
@@ -70,6 +70,10 @@ export async function GET(request: Request) {
       byMode: { CASH: 0, UPI: 0, CARD: 0 },
       dailySummary: {} as Record<string, { amount: number; count: number }>
     }
+
+    const renewalsThisMonth = payments.filter(
+      (p) => p.member.createdAt < startOfMonth
+    ).length
 
     payments.forEach(p => {
       revenue.total += p.amount
@@ -138,7 +142,8 @@ export async function GET(request: Request) {
       members: {
         newThisMonth: newMembersCount,
         activeTotal: activeMembersCount,
-        expiredThisMonth: expiredMembersCount
+        expiredThisMonth: expiredMembersCount,
+        renewalsThisMonth
       },
       attendance: {
         totalSessions: traffic.totalSessions,
@@ -149,7 +154,8 @@ export async function GET(request: Request) {
           count: stats.count,
           averageDuration: stats.durationCount > 0 ? Math.round(stats.totalDuration / stats.durationCount) : 0
         })),
-        peakHour
+        peakHour,
+        hourHeatmap: Array.from({ length: 24 }, (_, h) => traffic.hourHeatmap[h] ?? 0)
       }
     }, {
       headers: { 

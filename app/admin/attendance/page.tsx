@@ -1,8 +1,16 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
+import { useQueries } from "@tanstack/react-query"
 import { useAttendanceToday } from "@/hooks/useAttendance"
+
+interface PaymentSummary {
+  dueAmount: number
+  totalPaid: number
+  remaining: number
+  isPaidFull: boolean
+}
 
 interface AttendanceRecord {
   memberId: string
@@ -55,6 +63,44 @@ export default function AttendancePage() {
   const data = rawData as AttendanceData | undefined
   const [filter, setFilter] = useState("All")
   const [now, setNow] = useState(new Date())
+
+  const memberIds = useMemo(
+    () => [...new Set(data?.records.map((r) => r.memberId) ?? [])],
+    [data?.records]
+  )
+
+  const summaryQueries = useQueries({
+    queries: memberIds.map((id) => ({
+      queryKey: ["payments", "summary", id],
+      queryFn: async (): Promise<PaymentSummary> => {
+        const res = await fetch(`/api/payments/summary/${id}`)
+        if (!res.ok) throw new Error("Failed")
+        return res.json()
+      },
+      staleTime: 30 * 1000,
+      enabled: memberIds.length > 0 && !loading,
+    })),
+  })
+
+  const summaryByMemberId = useMemo(() => {
+    return Object.fromEntries(
+      memberIds.map((id, i) => [
+        id,
+        {
+          data: summaryQueries[i]?.data ?? null,
+          isPending: summaryQueries[i]?.isPending ?? false,
+          isError: summaryQueries[i]?.isError ?? false,
+        },
+      ])
+    ) as Record<
+      string,
+      {
+        data: PaymentSummary | null
+        isPending: boolean
+        isError: boolean
+      }
+    >
+  }, [memberIds, summaryQueries])
 
   // Tick now every 60s for live durations
   useEffect(() => {
@@ -203,7 +249,7 @@ export default function AttendancePage() {
 
         {/* Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left min-w-[700px]">
+          <table className="w-full text-left min-w-[900px]">
             <thead className="border-b border-[#1C1C1C] bg-[#0D0D0D]">
               <tr>
                 <th className="text-[#333333] text-[10px] tracking-widest uppercase px-5 py-3 font-bold">Member</th>
@@ -211,20 +257,21 @@ export default function AttendancePage() {
                 <th className="text-[#333333] text-[10px] tracking-widest uppercase px-5 py-3 font-bold">Check Out</th>
                 <th className="text-[#333333] text-[10px] tracking-widest uppercase px-5 py-3 font-bold">Duration</th>
                 <th className="text-[#333333] text-[10px] tracking-widest uppercase px-5 py-3 font-bold">Status</th>
+                <th className="text-[#333333] text-[10px] tracking-widest uppercase px-5 py-3 font-bold">Payment</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i} className="border-b border-[#0D0D0D]">
-                    <td colSpan={5} className="px-5 py-3">
+                    <td colSpan={6} className="px-5 py-3">
                       <div className="bg-[#1C1C1C] animate-pulse h-10 rounded" />
                     </td>
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-16 text-center">
+                  <td colSpan={6} className="py-16 text-center">
                     <p className="text-[#333333] text-[14px] font-medium">No check-ins today</p>
                     <p className="text-[#2A2A2A] text-[12px] mt-1">
                       Members will appear here as they check in
@@ -283,6 +330,59 @@ export default function AttendancePage() {
                     )
                   }
 
+                  const pay = summaryByMemberId[record.memberId]
+                  let paymentCell: React.ReactNode
+                  if (!pay) {
+                    paymentCell = (
+                      <span className="text-[#333333] text-[12px]">—</span>
+                    )
+                  } else if (pay.isPending) {
+                    paymentCell = (
+                      <div className="h-5 w-20 animate-pulse rounded bg-[#1C1C1C]" />
+                    )
+                  } else if (pay.isError || !pay.data) {
+                    paymentCell = (
+                      <span className="text-[#333333] text-[12px]">—</span>
+                    )
+                  } else if (pay.data.dueAmount === 0) {
+                    paymentCell = (
+                      <span className="inline-block rounded-md bg-[#1C1C1C] px-2.5 py-1 text-[11px] text-[#555555]">
+                        Free
+                      </span>
+                    )
+                  } else if (pay.data.isPaidFull) {
+                    paymentCell = (
+                      <span className="inline-block rounded-md bg-[#10B981]/10 px-2.5 py-1 text-[11px] font-medium text-[#10B981]">
+                        Paid ✓
+                      </span>
+                    )
+                  } else {
+                    paymentCell = (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          router.push(
+                            `/admin/members/${record.memberId}#payments`
+                          )
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            router.push(
+                              `/admin/members/${record.memberId}#payments`
+                            )
+                          }
+                        }}
+                        className="inline-block cursor-pointer rounded-md bg-[#D11F00]/10 px-2.5 py-1 text-[11px] font-medium text-[#D11F00] hover:opacity-80"
+                      >
+                        ₹{pay.data.remaining.toLocaleString("en-IN")} due
+                      </span>
+                    )
+                  }
+
                   return (
                     <tr
                       key={`${record.memberId}-${idx}`}
@@ -327,6 +427,9 @@ export default function AttendancePage() {
 
                       {/* Status */}
                       <td className="px-5 py-4">{statusBadge}</td>
+
+                      {/* Payment */}
+                      <td className="px-5 py-4">{paymentCell}</td>
                     </tr>
                   )
                 })

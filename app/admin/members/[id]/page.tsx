@@ -138,6 +138,13 @@ export default function MemberProfilePage() {
   }, [id])
 
   useEffect(() => {
+    if (typeof window === "undefined") return
+    if (window.location.hash === "#payments") {
+      setTab("PAYMENTS")
+    }
+  }, [id])
+
+  useEffect(() => {
     if (id) {
       fetchAttendance(attendancePage)
     }
