@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { useMembers } from "@/hooks/useMembers"
 
 interface Member {
   id: string
@@ -15,23 +16,13 @@ interface Member {
 
 export default function MembersPage() {
   const router = useRouter()
-  const [members, setMembers] = useState<Member[]>([])
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("All")
-  const [loading, setLoading] = useState(true)
+  const [planFilter, setPlanFilter] = useState("All Plans")
 
-  useEffect(() => {
-    fetch("/api/members")
-      .then(res => res.json())
-      .then(data => {
-        setMembers(data.members || [])
-        setLoading(false)
-      })
-      .catch(err => {
-        console.error(err)
-        setLoading(false)
-      })
-  }, [])
+  const { data: rawData, isLoading: loading } = useMembers()
+  const members: Member[] = rawData?.members ?? []
+
 
   const now = new Date()
   
@@ -61,6 +52,19 @@ export default function MembersPage() {
     }
   }
 
+  const planMap: Record<string, string> = {
+    "Monthly":     "MONTHLY",
+    "Quarterly":   "QUARTERLY",
+    "Half-Yearly": "HALF_YEARLY",
+    "Annual":      "ANNUAL",
+    "Personal":    "PERSONAL_TRAINING",
+  }
+
+  const planCounts = members.reduce((acc, m) => {
+    acc[m.membershipType] = (acc[m.membershipType] ?? 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+
   const filtered = members.filter(m => {
     const isExpired = new Date(m.endDate) < now
 
@@ -74,7 +78,11 @@ export default function MembersPage() {
       statusFilter === "Inactive" ? m.status === "INACTIVE" :
       statusFilter === "Expired" ? isExpired : true
 
-    return matchesSearch && matchesStatus
+    const matchesPlan =
+      planFilter === "All Plans" ? true :
+      m.membershipType === planMap[planFilter]
+
+    return matchesSearch && matchesStatus && matchesPlan
   })
 
   return (
@@ -132,6 +140,34 @@ export default function MembersPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* PLAN FILTER ROW */}
+      <div className="mt-3 flex gap-2 flex-wrap">
+        {["All Plans", "Monthly", "Quarterly", "Half-Yearly", "Annual", "Personal"].map(tab => {
+          const isActive = planFilter === tab
+          const enumKey = planMap[tab]
+          const count = enumKey ? planCounts[enumKey] ?? 0 : null
+          return (
+            <button
+              key={tab}
+              onClick={() => setPlanFilter(tab)}
+              className={`
+                px-4 py-2 rounded-lg text-[12px] font-medium transition-all duration-200 cursor-pointer border
+                ${isActive
+                  ? "bg-[#1C1C1C] text-white border-[#2A2A2A]"
+                  : "bg-[#111111] text-[#444444] border-[#1C1C1C] hover:text-[#888888]"}
+              `}
+            >
+              {tab}
+              {count !== null && count > 0 && (
+                <span className={`ml-1.5 text-[10px] ${isActive ? "text-[#888888]" : "text-[#444444]"}`}>
+                  {count}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* MEMBERS TABLE */}

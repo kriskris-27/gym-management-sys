@@ -150,10 +150,11 @@ export default function MemberProfilePage() {
     const istNow = new Date(now.getTime() + istOffset)
     return istNow.toISOString().split("T")[0]
   }
-  const { register: regPayment, handleSubmit: handlePaymentSubmit, reset: resetPayment, formState: { errors: payErrors, isSubmitting: isPaying } } = useForm<PaymentFormData>({
+  const { register: regPayment, handleSubmit: handlePaymentSubmit, reset: resetPayment, watch: watchPayment, setValue: setPaymentValue, formState: { errors: payErrors, isSubmitting: isPaying } } = useForm<PaymentFormData>({
     resolver: zodResolver(paymentSchema) as any,
     defaultValues: { date: getTodayStr(), mode: "UPI" as any }
   })
+  const watchedAmount = watchPayment("amount")
   const [paymentSuccess, setPaymentSuccess] = useState(false)
 
   const onPaymentSubmit = async (data: PaymentFormData) => {
@@ -588,7 +589,23 @@ export default function MemberProfilePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={() => setShowPaymentModal(false)} />
           <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[400px] w-full relative z-10 animate-modal flex flex-col shadow-2xl shadow-black/50">
-            <h2 className="text-white text-[18px] font-black tracking-tight mb-6">Add Payment</h2>
+            <h2 className="text-white text-[18px] font-black tracking-tight mb-4">Add Payment</h2>
+
+            {/* REMAINING BALANCE BANNER */}
+            {paymentSummary ? (
+              <div className="bg-[#0F0F0F] border border-[#1C1C1C] rounded-lg px-4 py-3 mb-6 flex justify-between items-center">
+                <span className="text-[#444444] text-[12px]">Remaining Balance</span>
+                {paymentSummary.remaining > 0 ? (
+                  <span className="text-[#D11F00] text-[16px] font-black">₹{paymentSummary.remaining.toLocaleString('en-IN')}</span>
+                ) : paymentSummary.remaining === 0 ? (
+                  <span className="text-[#10B981] text-[14px] font-bold">Fully Paid ✓</span>
+                ) : (
+                  <span className="text-[#F59E0B] text-[14px] font-bold">Overpaid by ₹{Math.abs(paymentSummary.remaining).toLocaleString('en-IN')}</span>
+                )}
+              </div>
+            ) : (
+              <div className="bg-[#0F0F0F] border border-[#1C1C1C] rounded-lg px-4 py-3 mb-6 h-12 animate-pulse" />
+            )}
             
             <form onSubmit={handlePaymentSubmit(onPaymentSubmit as any)} className="space-y-5">
               <div>
@@ -602,6 +619,28 @@ export default function MemberProfilePage() {
                     className={`w-full bg-[#0F0F0F] border ${payErrors.amount ? 'border-[#D11F00]' : 'border-[#242424]'} text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-bold`}
                   />
                 </div>
+                {/* Quick fill */}
+                {paymentSummary && paymentSummary.remaining > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentValue("amount", paymentSummary.remaining as any)}
+                    className="text-[#D11F00] text-[11px] mt-1.5 underline underline-offset-2 hover:text-[#FF3A1A] transition-colors cursor-pointer"
+                  >
+                    Pay remaining ₹{paymentSummary.remaining.toLocaleString('en-IN')}
+                  </button>
+                )}
+                {/* Live running total */}
+                {paymentSummary && watchedAmount && Number(watchedAmount) > 0 && (() => {
+                  const afterPayment = (paymentSummary.totalPaid) + Number(watchedAmount)
+                  const afterRemaining = (paymentSummary.dueAmount) - afterPayment
+                  if (afterRemaining <= 0 && afterRemaining > -1) {
+                    return <p className="text-[#10B981] text-[11px] mt-1">After this: Fully paid ✓</p>
+                  } else if (afterRemaining < -1) {
+                    return <p className="text-[#F59E0B] text-[11px] mt-1">After this: Overpaid by ₹{Math.abs(afterRemaining).toLocaleString('en-IN')}</p>
+                  } else {
+                    return <p className="text-[#444444] text-[11px] mt-1">After this: ₹{afterRemaining.toLocaleString('en-IN')} remaining</p>
+                  }
+                })()}
               </div>
 
               <div className="grid grid-cols-2 gap-4">

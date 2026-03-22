@@ -115,10 +115,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="px-6 pb-6 border-b border-[#1C1C1C]">
           <div className="flex items-center gap-3">
             <div className="w-7 h-7 rounded-lg bg-[#D11F00] flex items-center justify-center">
-              <span className="font-bold text-white text-xs">S</span>
+              <span className="font-bold text-white text-xs">RF</span>
             </div>
             <span className="text-white text-[11px] font-bold tracking-[0.2em] uppercase">
-              Starliette
+              Royal Fitness
             </span>
           </div>
         </div>

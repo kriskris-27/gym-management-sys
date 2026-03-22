@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useDashboard } from "@/hooks/useDashboard"
 
 interface Member {
   id: string
@@ -42,28 +42,10 @@ interface DashboardData {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: rawData, isLoading: loading, refetch } = useDashboard()
+  const data = rawData as DashboardData | undefined
+  const fetchData = () => { refetch() }
 
-  const fetchData = async () => {
-    try {
-      const res = await fetch("/api/dashboard/summary")
-      if (res.ok) {
-        const json = await res.json()
-        setData(json)
-      }
-    } catch (e) {
-      console.error("Dashboard fetch error:", e)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 30000)
-    return () => clearInterval(interval)
-  }, [])
 
   // Format date natively
   const formattedDate = new Intl.DateTimeFormat('en-US', {
