@@ -14,9 +14,20 @@ export async function GET(
     const { memberId } = await params
     const { searchParams } = new URL(request.url)
 
+    // Validate memberId
+    if (!memberId || memberId.trim() === "") {
+      return NextResponse.json(
+        { error: "Member ID required" },
+        { status: 400 }
+      )
+    }
+
     // Standard pagination setup
     const page = Math.max(1, parseInt(searchParams.get("page") || "1"))
-    const limit = Math.max(1, parseInt(searchParams.get("limit") || "20"))
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(searchParams.get("limit") || "20"))
+    )
     const skip = (page - 1) * limit
 
     // 1. Verify Member Exists & Not Deleted
@@ -57,7 +68,13 @@ export async function GET(
       page,
       limit,
       records: records.map((r) => ({
-        date: r.date.toISOString().split("T")[0],
+        date: (() => {
+          const istOffset = 5.5 * 60 * 60 * 1000
+          const istDate = new Date(
+            r.date.getTime() + istOffset
+          )
+          return istDate.toISOString().split("T")[0]
+        })(),
         checkedInAt: r.checkedInAt.toISOString(),
         checkedOutAt: r.checkedOutAt?.toISOString() || null,
         durationMinutes: r.durationMinutes,

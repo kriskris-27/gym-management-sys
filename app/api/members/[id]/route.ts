@@ -45,14 +45,19 @@ export async function GET(
       planPrice = dbPrice?.amount || 0
     }
 
+    const periodStart = member.lastRenewalAt ?? member.startDate
+
+    const paymentWhere: any = {
+      memberId: member.id,
+      createdAt: { gte: periodStart }
+    }
+
+    if (member.status === "ACTIVE") {
+      paymentWhere.date = { lte: member.endDate }
+    }
+
     const paymentsAggregate = await prisma.payment.aggregate({
-      where: {
-        memberId: member.id,
-        date: {
-          gte: member.startDate,
-          lte: member.endDate
-        }
-      },
+      where: paymentWhere,
       _sum: {
         amount: true
       }
@@ -112,6 +117,9 @@ export async function PUT(
     // 2. Prepare payload
     let finalUpdatePayload: any = { ...updateData }
     delete finalUpdatePayload.id
+    
+    // Status can only be changed via DELETE and PATCH
+    delete finalUpdatePayload.status
 
     // 3. membershipType changed → auto-recalculate endDate
     if (updateData.membershipType && updateData.membershipType !== existingMember.membershipType) {
@@ -130,10 +138,13 @@ export async function PUT(
           ANNUAL: 365,
         }
         const daysToAdd = daysMap[updateData.membershipType as keyof typeof daysMap]
-        const startDateBasis = updateData.startDate ? new Date(updateData.startDate) : new Date(existingMember.startDate)
         
-        const newEndDate = new Date(startDateBasis)
-        newEndDate.setDate(startDateBasis.getDate() + daysToAdd)
+        const startStr = updateData.startDate
+          ? updateData.startDate.toISOString().split("T")[0]
+          : existingMember.startDate.toISOString().split("T")[0]
+        
+        const [y, m, d] = startStr.split("-").map(Number)
+        const newEndDate = new Date(Date.UTC(y, m - 1, d + daysToAdd))
         finalUpdatePayload.endDate = newEndDate
       }
     }
@@ -205,8 +216,8 @@ export async function DELETE(
 }
 
 /**
- * PATCH: Renewal handler for extending membership
- * Logic: Supports renewing with optional membership type change
+ * PATCH: Handler for renewal and restore actions
+ * Logic: Supports renewing with optional membership type change, and restoring deleted members
  */
 export async function PATCH(
   request: Request,
@@ -220,16 +231,61 @@ export async function PATCH(
       where: { id }
     })
 
-    if (!member || member.status === "DELETED") {
+    if (!member) {
       return NextResponse.json(
         { error: "Member not found" },
         { status: 404 }
       )
     }
 
-    // CASE 1: Renewal
+    // CASE 1: Restore deleted member
+    // body = { action: "restore" }
+    if (body.action === "restore") {
+      const { RestoreMemberSchema } = await import("@/lib/validations")
+      const validated = RestoreMemberSchema.safeParse(body)
+      if (!validated.success) {
+        return NextResponse.json(
+          { error: "Invalid request" },
+          { status: 400 }
+        )
+      }
+
+      if (member.status !== "DELETED") {
+        return NextResponse.json(
+          { error: "Member is not deleted" },
+          { status: 400 }
+        )
+      }
+
+      const restored = await prisma.member.update({
+        where: { id },
+        data: {
+          status: "ACTIVE"
+        }
+      })
+
+      return NextResponse.json({ member: restored })
+    }
+
+    // CASE 2: Renewal
     // body = { action: "renew", membershipType, startDate, customPrice }
     if (body.action === "renew") {
+      const { RenewMemberSchema } = await import("@/lib/validations")
+      const validated = RenewMemberSchema.safeParse(body)
+      if (!validated.success) {
+        return NextResponse.json(
+          { error: validated.error.issues[0].message },
+          { status: 400 }
+        )
+      }
+
+      if (member.status === "DELETED") {
+        return NextResponse.json(
+          { error: "Cannot renew a deleted member. Restore first." },
+          { status: 400 }
+        )
+      }
+
       const daysMap: Record<string, number> = {
         MONTHLY: 30,
         QUARTERLY: 90,
@@ -272,7 +328,8 @@ export async function PATCH(
           startDate: start,
           endDate: end,
           customPrice: newPrice,
-          status: "ACTIVE"  // always reactivate on renewal
+          status: "ACTIVE",  // always reactivate on renewal
+          lastRenewalAt: new Date()  // exact renewal moment (we use createdAt for precision)
         }
       })
 

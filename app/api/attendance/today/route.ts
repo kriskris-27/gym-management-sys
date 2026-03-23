@@ -29,6 +29,7 @@ export async function GET() {
             name: true,
             phone: true,
             endDate: true,
+            status: true,
           },
         },
       },
@@ -37,10 +38,20 @@ export async function GET() {
       },
     })
 
-    // Count unique members present today
-    const totalPresent = new Set(records.map((r) => r.memberId)).size
+    // Filter out deleted members
+    const activeRecords = records.filter(
+      r => r.member.status !== "DELETED"
+    )
 
-    const formattedRecords = records.map((record) => {
+    // Count unique members present today
+    const totalPresent = new Set(activeRecords.map((r) => r.memberId)).size
+
+    // Count members currently inside (no checkout)
+    const currentlyInside = activeRecords.filter(
+      r => !r.checkedOutAt
+    ).length
+
+    const formattedRecords = activeRecords.map((record) => {
       const isOngoing = !record.checkedOutAt
       
       // Use stored duration for closed sessions, calculate live for ongoing
@@ -66,6 +77,7 @@ export async function GET() {
       {
         date: istDateStr,
         totalPresent,
+        currentlyInside,
         records: formattedRecords,
       },
       {

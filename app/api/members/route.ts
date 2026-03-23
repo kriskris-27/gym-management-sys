@@ -8,17 +8,19 @@ import { MemberCreateSchema } from "@/lib/validations"
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const search = searchParams.get("search")
+    ?.trim()
+    .slice(0, 100)
   const status = searchParams.get("status")
 
   try {
-    const where: any = {
-      // Hard block on deleted members
-      status: { not: "DELETED" },
-    }
+    const where: any = {}
 
-    // Status filtering (only allow ACTIVE/INACTIVE)
-    if (status && ["ACTIVE", "INACTIVE"].includes(status)) {
+    // Status filtering (allow ACTIVE/INACTIVE/DELETED)
+    if (status && ["ACTIVE", "INACTIVE", "DELETED"].includes(status)) {
       where.status = status
+    } else if (!status) {
+      // Default: exclude DELETED members
+      where.status = { not: "DELETED" }
     }
 
     // Search by Name or Phone (case-insensitive)
@@ -41,6 +43,7 @@ export async function GET(request: Request) {
         endDate: true,
         status: true,
         customPrice: true,
+        lastRenewalAt: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
@@ -57,18 +60,25 @@ export async function GET(request: Request) {
       memberIds.length > 0
         ? await prisma.payment.findMany({
             where: { memberId: { in: memberIds } },
-            select: { memberId: true, amount: true, date: true },
+            select: { memberId: true, amount: true, date: true, createdAt: true },
           })
         : []
 
     const enriched = members.map((m) => {
       const totalPaid = periodPayments
-        .filter(
-          (p) =>
-            p.memberId === m.id &&
-            p.date >= m.startDate &&
-            p.date <= m.endDate
-        )
+        .filter(p => {
+          const periodStart = m.lastRenewalAt ?? m.startDate
+          
+          // Use createdAt for period start comparison (has timestamp precision)
+          const afterStart = p.createdAt >= periodStart
+          
+          // Use date for end bound (ACTIVE only)
+          const beforeEnd = m.status === "ACTIVE" 
+            ? p.date <= m.endDate 
+            : true
+            
+          return p.memberId === m.id && afterStart && beforeEnd
+        })
         .reduce((sum, p) => sum + p.amount, 0)
 
       const dueAmount = m.customPrice !== null && m.customPrice !== undefined
@@ -123,6 +133,13 @@ export async function POST(request: Request) {
     const startDate = new Date(data.startDate)
     let endDate: Date
 
+    // Helper function to add days to UTC date
+    function addDaysUTC(dateStr: string, days: number): Date {
+      const [y, m, d] = dateStr.split("-").map(Number)
+      const result = new Date(Date.UTC(y, m - 1, d + days))
+      return result
+    }
+
     // Auto-calculate endDate based on membershipType
     if (data.membershipType === "PERSONAL_TRAINING" && data.endDate) {
       endDate = new Date(data.endDate)
@@ -133,9 +150,10 @@ export async function POST(request: Request) {
         HALF_YEARLY: 180,
         ANNUAL: 365,
       }
-      const daysToAdd = daysMap[data.membershipType as keyof typeof daysMap]
-      endDate = new Date(startDate)
-      endDate.setDate(startDate.getDate() + daysToAdd)
+      endDate = addDaysUTC(
+        data.startDate.toISOString().split("T")[0],
+        daysMap[data.membershipType as keyof typeof daysMap]
+      )
     }
 
     // Lock price at creation time — always store on member record

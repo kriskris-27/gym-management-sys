@@ -22,8 +22,16 @@ export default function MembersPage() {
   const [statusFilter, setStatusFilter] = useState("All")
   const [planFilter, setPlanFilter] = useState("All Plans")
   const [paymentFilter, setPaymentFilter] = useState("All Payments")
+  const [restoringId, setRestoringId] = useState<string | null>(null)
 
-  const { data: rawData, isLoading: loading } = useMembers()
+  const statusMap: Record<string, string | undefined> = {
+    "All": undefined,
+    "Active": "ACTIVE",
+    "Expired": "ACTIVE", // Expired members are still ACTIVE status but with endDate < now
+    "Deleted": "DELETED"
+  }
+  
+  const { data: rawData, isLoading: loading, refetch } = useMembers(undefined, statusMap[statusFilter])
   const members: Member[] = rawData?.members ?? []
 
 
@@ -77,12 +85,11 @@ export default function MembersPage() {
       m.name.toLowerCase().includes(search.toLowerCase()) ||
       m.phone.includes(search)
 
+    // For "Expired" filter, still need to filter frontend since API doesn't know about dates
     const matchesStatus =
-      statusFilter === "All" ? m.status !== "DELETED" :
+      statusFilter === "Expired" ? isExpired && m.status === "ACTIVE" :
       statusFilter === "Active" ? !isExpired && m.status === "ACTIVE" :
-      statusFilter === "Expired" ? isExpired :
-      statusFilter === "Deleted" ? m.status === "DELETED" :
-      true
+      true // API already handles "All" and "Deleted" filters
 
     const matchesPlan =
       planFilter === "All Plans" ? true :
@@ -108,6 +115,25 @@ export default function MembersPage() {
 
     return matchesPayment
   })
+
+  const handleRestore = async (memberId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setRestoringId(memberId)
+    try {
+      const res = await fetch(`/api/members/${memberId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restore" })
+      })
+      if (res.ok) {
+        refetch()
+      }
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setRestoringId(null)
+    }
+  }
 
   return (
     <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 overflow-x-hidden">
@@ -359,10 +385,30 @@ export default function MembersPage() {
 
                       {/* ACTION */}
                       <td className="px-5 py-4">
-                        <span className="text-[#444444] text-[12px] font-medium group-hover:text-[#D11F00] transition-colors flex items-center gap-1">
-                          View
-                          <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                        </span>
+                        {member.status === "DELETED" ? (
+                          <button
+                            onClick={(e) => handleRestore(member.id, e)}
+                            disabled={restoringId === member.id}
+                            className="text-[#D11F00] hover:text-[#FF6B00] text-[12px] font-medium transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+                          >
+                            {restoringId === member.id ? (
+                              <>
+                                <svg className="w-3 h-3 animate-spin" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/></svg>
+                                Restoring...
+                              </>
+                            ) : (
+                              <>
+                                Restore
+                                <svg className="w-3 h-3 hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <span className="text-[#444444] hover:text-[#D11F00] text-[12px] font-medium group-hover:text-[#D11F00] transition-colors flex items-center gap-1 cursor-pointer">
+                            View
+                            <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )

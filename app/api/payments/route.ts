@@ -23,14 +23,37 @@ export async function GET(request: Request) {
     // Flexible Date Ranges (supports partial windows)
     if (startDate || endDate) {
       where.date = {}
-      if (startDate) where.date.gte = new Date(startDate)
-      if (endDate) where.date.lte = new Date(endDate)
+      if (startDate) {
+        const parsed = new Date(startDate)
+        if (isNaN(parsed.getTime())) {
+          return NextResponse.json(
+            { error: "Invalid startDate format" },
+            { status: 400 }
+          )
+        }
+        where.date.gte = parsed
+      }
+      if (endDate) {
+        const parsed = new Date(endDate)
+        if (isNaN(parsed.getTime())) {
+          return NextResponse.json(
+            { error: "Invalid endDate format" },
+            { status: 400 }
+          )
+        }
+        where.date.lte = parsed
+      }
     }
 
     // Validate and apply Payment Mode Filter
     if (mode && ["CASH", "UPI", "CARD"].includes(mode)) {
       where.mode = mode
     }
+
+    // Pagination
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1"))
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "50")))
+    const skip = (page - 1) * limit
 
     // Run query and head count concurrently
     const [payments, total] = await Promise.all([
@@ -39,7 +62,9 @@ export async function GET(request: Request) {
         include: {
           member: { select: { name: true } }
         },
-        orderBy: { date: "desc" }
+        orderBy: { date: "desc" },
+        skip,
+        take: limit
       }),
       prisma.payment.count({ where })
     ])
@@ -56,7 +81,13 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       payments: formattedPayments,
-      total
+      total,
+      page,
+      limit
+    }, {
+      headers: {
+        "Cache-Control": "s-maxage=30, stale-while-revalidate"
+      }
     })
 
   } catch (error) {
@@ -103,50 +134,8 @@ export async function POST(request: Request) {
       include: {
         member: { select: { name: true } }
       }
-    })
-
-    // 3. Update Member if Expired and Now Fully Paid
-    const isExpired = new Date(member.endDate) < new Date()
-    if (isExpired) {
-      const paymentsSum = await prisma.payment.aggregate({
-        where: { 
-          memberId: member.id,
-          date: {
-            gte: member.startDate,
-            lte: member.endDate
-          }
-        },
-        _sum: { amount: true }
-      })
-
-      const totalPaid = paymentsSum._sum.amount ?? 0
-      const dbPrice = await prisma.planPricing.findUnique({
-        where: { membershipType: member.membershipType }
-      })
-      const planPrice = member.customPrice ?? dbPrice?.amount ?? 0
-
-      if (totalPaid >= planPrice) {
-        // Member has paid in full for expired period - extend membership by the plan duration
-        const durationDays: Record<string, number> = {
-          "MONTHLY": 30,
-          "QUARTERLY": 90,
-          "HALF_YEARLY": 180,
-          "ANNUAL": 365,
-          "PERSONAL_TRAINING": 30
-        }
-        const membershipDurationDays = durationDays[member.membershipType] || 30
-        const newEndDate = new Date(member.endDate)
-        newEndDate.setDate(newEndDate.getDate() + membershipDurationDays)
-
-        await prisma.member.update({
-          where: { id: member.id },
-          data: { 
-            status: "ACTIVE",
-            endDate: newEndDate
-          }
-        })
-      }
-    }
+    })    
+    // 2. No auto-renewal. Use PATCH /api/members/[id] { action: "renew" } for renewals.
 
     return NextResponse.json({
       payment: {

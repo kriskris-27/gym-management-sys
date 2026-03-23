@@ -7,6 +7,14 @@ import { getISTDateRange, calcDuration, formatDuration } from "@/lib/utils"
 
 const rateLimitMap = new Map<string, { count: number; start: number }>()
 
+// Clean stale entries every 5 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 60000
+  for (const [ip, data] of rateLimitMap.entries()) {
+    if (data.start < cutoff) rateLimitMap.delete(ip)
+  }
+}, 5 * 60 * 1000)
+
 export async function POST(request: Request) {
   const ip = request.headers.get("x-forwarded-for") || "127.0.0.1"
   const now = new Date()
@@ -74,8 +82,23 @@ export async function POST(request: Request) {
 
     // CASE: No records at all OR Latest was yesterday and is already closed
     if (!latestRecord || (!isLatestToday && latestRecord.checkedOutAt)) {
-      await prisma.attendance.create({
-        data: { memberId: member.id, date: startOfTodayIST, checkedInAt: now },
+      await prisma.$transaction(async (tx) => {
+        const existing = await tx.attendance.findFirst({
+          where: {
+            memberId: member.id,
+            checkedInAt: { gte: startOfTodayIST },
+            checkedOutAt: null
+          }
+        })
+        if (!existing) {
+          await tx.attendance.create({
+            data: { 
+              memberId: member.id, 
+              date: startOfTodayIST, 
+              checkedInAt: now 
+            }
+          })
+        }
       })
       return NextResponse.json({
         ...baseResult,
@@ -87,12 +110,27 @@ export async function POST(request: Request) {
 
     // CASE: Open record from PREVIOUS day (Forgot to check out)
     if (!latestRecord.checkedOutAt && !isLatestToday) {
-      await prisma.attendance.update({
-        where: { id: latestRecord.id },
-        data: { checkedOutAt: now, autoClosed: true },
-      })
-      await prisma.attendance.create({
-        data: { memberId: member.id, date: startOfTodayIST, checkedInAt: now },
+      await prisma.$transaction(async (tx) => {
+        await tx.attendance.update({
+          where: { id: latestRecord.id },
+          data: { checkedOutAt: now, autoClosed: true }
+        })
+        const existing = await tx.attendance.findFirst({
+          where: {
+            memberId: member.id,
+            checkedInAt: { gte: startOfTodayIST },
+            checkedOutAt: null
+          }
+        })
+        if (!existing) {
+          await tx.attendance.create({
+            data: { 
+              memberId: member.id, 
+              date: startOfTodayIST, 
+              checkedInAt: now 
+            }
+          })
+        }
       })
       return NextResponse.json({
         ...baseResult,
@@ -122,6 +160,19 @@ export async function POST(request: Request) {
 
       // Open record TODAY
       const gap = calcDuration(latestRecord.checkedInAt, now)
+      const MIN_SESSION_MINUTES = 5
+
+      if (gap < MIN_SESSION_MINUTES) {
+        return NextResponse.json({
+          ...baseResult,
+          status: "CHECKED_IN",
+          message: `You're already checked in, ${member.name}! 👋`,
+          checkedInAt: latestRecord.checkedInAt.toISOString(),
+          checkedOutAt: null,
+          durationMinutes: null,
+          durationFormatted: null,
+        })
+      }
 
       if (gap < 240) { // < 4 hours → Normal Check-out
         await prisma.attendance.update({
@@ -138,12 +189,27 @@ export async function POST(request: Request) {
           durationFormatted: formatDuration(gap),
         })
       } else { // >= 4 hours → Auto-close + New Session
-        await prisma.attendance.update({
-          where: { id: latestRecord.id },
-          data: { checkedOutAt: now, autoClosed: true },
-        })
-        await prisma.attendance.create({
-          data: { memberId: member.id, date: startOfTodayIST, checkedInAt: now },
+        await prisma.$transaction(async (tx) => {
+          await tx.attendance.update({
+            where: { id: latestRecord.id },
+            data: { checkedOutAt: now, autoClosed: true }
+          })
+          const existing = await tx.attendance.findFirst({
+            where: {
+              memberId: member.id,
+              checkedInAt: { gte: startOfTodayIST },
+              checkedOutAt: null
+            }
+          })
+          if (!existing) {
+            await tx.attendance.create({
+              data: { 
+                memberId: member.id, 
+                date: startOfTodayIST, 
+                checkedInAt: now 
+              }
+            })
+          }
         })
         return NextResponse.json({
           ...baseResult,
@@ -160,4 +226,11 @@ export async function POST(request: Request) {
     console.error("❌ Scan Error:", error)
     return NextResponse.json({ error: "Internal Error" }, { status: 500 })
   }
+}
+
+export async function GET() {
+  return NextResponse.json(
+    { error: "Method Not Allowed" },
+    { status: 405, headers: { Allow: "POST" } }
+  )
 }

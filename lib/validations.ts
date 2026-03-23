@@ -159,3 +159,26 @@ export const PricingUpdateSchema = z.object({
     .min(1, "At least one plan required")
     .max(5, "Maximum 5 plans allowed")
 }).strict();
+/**
+ * Member Renewal
+ */
+export const RenewMemberSchema = z.object({
+  action: z.literal("renew"),
+  membershipType: z.enum([
+    "MONTHLY", "QUARTERLY", "HALF_YEARLY",
+    "ANNUAL", "PERSONAL_TRAINING"
+  ]).optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  customPrice: z.coerce.number()
+    .min(0, "Price cannot be negative")
+    .max(99999, "Price too large")
+    .optional()
+}).strict();
+
+/**
+ * Member Restore
+ */
+export const RestoreMemberSchema = z.object({
+  action: z.literal("restore")
+}).strict();

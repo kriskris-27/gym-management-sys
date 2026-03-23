@@ -38,6 +38,7 @@ model Member {
   endDate        DateTime
   customPrice    Float?
   status         MemberStatus   @default(ACTIVE)
+  lastRenewalAt  DateTime?
   createdAt      DateTime       @default(now())
 
   attendance    Attendance[]

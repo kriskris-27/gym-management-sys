@@ -1,11 +1,14 @@
 "use client"
 
-import { useState, useEffect, use } from "react"
+import { useState, useEffect, use, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
+import { useMember } from "@/hooks/useMembers"
+import { usePayments, usePaymentSummary } from "@/hooks/usePayments"
+import { useMemberAttendance } from "@/hooks/useAttendance"
 
 interface Member {
   id: string
@@ -67,79 +70,43 @@ export default function MemberProfilePage() {
   const queryClient = useQueryClient()
   const id = params?.id as string
 
-  const [loading, setLoading] = useState(true)
-  const [notFound, setNotFound] = useState(false)
-
-  const [member, setMember] = useState<Member | null>(null)
-  const [attendance, setAttendance] = useState<{ records: AttendanceRecord[], total: number }>({ records: [], total: 0 })
-  const [payments, setPayments] = useState<PaymentRecord[]>([])
-  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null)
-  
-  const [tab, setTab] = useState<"ATTENDANCE" | "PAYMENTS">("ATTENDANCE")
+  // React Query hooks - replace manual fetch + useState
+  const { data: memberData, isLoading: memberLoading, isError: memberError } = useMember(id)
+  const { data: paymentsData, isLoading: paymentsLoading } = usePayments({ memberId: id })
+  const { data: summaryData, isLoading: summaryLoading } = usePaymentSummary(id)
   const [attendancePage, setAttendancePage] = useState(1)
   const ATTENDANCE_LIMIT = 10
+  const { data: attendanceData, isLoading: attendanceLoading } = useMemberAttendance(id, attendancePage, ATTENDANCE_LIMIT)
+
+  // Extract data from hooks
+  const member = memberData?.member || memberData
+  const payments = paymentsData?.payments || []
+  const paymentSummary = summaryData
+  const attendance = attendanceData || { records: [], total: 0 }
+  const loading = memberLoading || paymentsLoading || summaryLoading || attendanceLoading
+  const notFound = memberError || (!memberLoading && !member)
+
+  // UI State
+  const [tab, setTab] = useState<"ATTENDANCE" | "PAYMENTS">("ATTENDANCE")
 
   // Modals state
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showRenewalModal, setShowRenewalModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [renewLoading, setRenewLoading] = useState(false)
+  const [renewError, setRenewError] = useState("")
+  const [renewForm, setRenewForm] = useState({
+    membershipType: "",
+    startDate: "",
+    endDate: "",
+    customPrice: 0
+  })
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // Fetch logic
-  const fetchMemberData = async () => {
-    try {
-      const [memRes, payRes, sumRes] = await Promise.all([
-        fetch(`/api/members/${id}`, { headers: { "Cache-Control": "no-cache" } }),
-        fetch(`/api/payments?memberId=${id}`, { headers: { "Cache-Control": "no-cache" } }),
-        fetch(`/api/payments/summary/${id}`, { headers: { "Cache-Control": "no-cache" } })
-      ])
-      
-      if (memRes.status === 404) {
-        setNotFound(true)
-        setLoading(false)
-        return
-      }
-
-      if (memRes.ok) {
-        const memData = await memRes.json()
-        setMember(memData.member || memData)
-      }
-      if (payRes.ok) {
-        const payData = await payRes.json()
-        setPayments(payData.payments)
-      }
-      if (sumRes.ok) {
-        const summaryData = await sumRes.json()
-        setPaymentSummary(summaryData)
-      } else {
-        setPaymentSummary({ dueAmount: 0, totalPaid: 0, remaining: 0, isPaidFull: true })
-      }
-    } catch (e) {
-      console.error(e)
-      setPaymentSummary({ dueAmount: 0, totalPaid: 0, remaining: 0, isPaidFull: true })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchAttendance = async (page: number) => {
-    try {
-      const res = await fetch(`/api/attendance/${id}?page=${page}&limit=${ATTENDANCE_LIMIT}`, { headers: { "Cache-Control": "no-cache" } })
-      if (res.ok) {
-        const data = await res.json()
-        setAttendance({ records: data.records, total: data.total })
-      }
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  useEffect(() => {
-    if (id) {
-      fetchMemberData()
-      fetchAttendance(1)
-    }
-  }, [id])
-
+  // Hash-based tab switching
   useEffect(() => {
     if (typeof window === "undefined") return
     if (window.location.hash === "#payments") {
@@ -147,11 +114,105 @@ export default function MemberProfilePage() {
     }
   }, [id])
 
+  // Dropdown close listener
   useEffect(() => {
-    if (id) {
-      fetchAttendance(attendancePage)
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false)
+      }
     }
-  }, [attendancePage])
+    if (dropdownOpen) {
+      document.addEventListener("click", handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener("click", handleClickOutside)
+    }
+  }, [dropdownOpen])
+
+  // Initialize renewal form when modal opens
+  useEffect(() => {
+    if (member && showRenewalModal) {
+      setRenewForm({
+        membershipType: member.membershipType,
+        startDate: getTodayStr(),
+        endDate: "",
+        customPrice: paymentSummary?.dueAmount ?? 0
+      })
+      setRenewError("")
+    }
+  }, [member, showRenewalModal, paymentSummary])
+
+  // Renewal handler
+  const handleRenewal = async () => {
+    setRenewLoading(true)
+    setRenewError("")
+    try {
+      const res = await fetch(`/api/members/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "renew",
+          membershipType: renewForm.membershipType,
+          startDate: renewForm.startDate,
+          endDate: renewForm.membershipType === "PERSONAL_TRAINING" ? renewForm.endDate : undefined,
+          customPrice: renewForm.customPrice
+        })
+      })
+      if (res.ok) {
+        setShowRenewalModal(false)
+        // Invalidate all related queries - React Query will refetch automatically
+        queryClient.invalidateQueries({ queryKey: ["payments"] })
+        queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
+        queryClient.invalidateQueries({ queryKey: ["member", id] })
+        queryClient.invalidateQueries({ queryKey: ["members"] })
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+      } else {
+        const json = await res.json()
+        setRenewError(json.error ?? "Failed to renew membership")
+      }
+    } catch (e) {
+      setRenewError("Network error. Please try again.")
+      console.error(e)
+    } finally {
+      setRenewLoading(false)
+    }
+  }
+
+  // Fetch plan price when membership type changes
+  const fetchPlanPrice = async (type: string) => {
+    try {
+      const res = await fetch("/api/settings/pricing")
+      if (res.ok) {
+        const data = await res.json()
+        const plan = data.pricing.find((p: any) => p.membershipType === type)
+        setRenewForm(prev => ({
+          ...prev,
+          customPrice: plan?.amount ?? 0
+        }))
+      }
+    } catch (e) {
+      console.error("Failed to fetch plan price", e)
+    }
+  }
+
+  // Delete handler
+  const handleDelete = async () => {
+    setDeleteLoading(true)
+    try {
+      const res = await fetch(`/api/members/${id}`, {
+        method: "DELETE"
+      })
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ["members"] })
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+        router.push("/admin/members")
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
 
   // Payment Form Hook
   const getTodayStr = () => {
@@ -176,12 +237,13 @@ export default function MemberProfilePage() {
       })
       if (res.ok) {
         setPaymentSuccess(true)
+        // Invalidate all related queries - React Query will refetch automatically
         queryClient.invalidateQueries({ queryKey: ["payments"] })
         queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
-        queryClient.invalidateQueries({ queryKey: ["members"] })
         queryClient.invalidateQueries({ queryKey: ["member", id] })
+        queryClient.invalidateQueries({ queryKey: ["members"] })
         queryClient.invalidateQueries({ queryKey: ["dashboard"] })
-        await fetchMemberData() // refresh payments and wait for it to complete
+        
         setTimeout(() => {
           setShowPaymentModal(false)
           setPaymentSuccess(false)
@@ -235,7 +297,9 @@ export default function MemberProfilePage() {
       })
       if (res.ok) {
         setEditSuccess(true)
-        fetchMemberData()
+        // Invalidate member queries - React Query will refetch automatically
+        queryClient.invalidateQueries({ queryKey: ["member", id] })
+        queryClient.invalidateQueries({ queryKey: ["members"] })
         setTimeout(() => {
           setShowEditModal(false)
           setEditSuccess(false)
@@ -301,7 +365,6 @@ export default function MemberProfilePage() {
         queryClient.invalidateQueries({ queryKey: ["members"] })
         queryClient.invalidateQueries({ queryKey: ["dashboard"] })
         queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
-        await fetchMemberData()
         setTimeout(() => {
           setShowRenewalModal(false)
           setRenewalSuccess(false)
@@ -329,6 +392,16 @@ export default function MemberProfilePage() {
     return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`;
   }
   const formatTime = (isoStr: string) => new Date(isoStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+
+  // Helper to calculate end date for renewal
+  const calculateEndDate = (startDate: string, membershipType: string): string => {
+    if (!startDate) return ""
+    const daysMap: Record<string, number> = { MONTHLY: 30, QUARTERLY: 90, HALF_YEARLY: 180, ANNUAL: 365 }
+    const days = daysMap[membershipType] || 30
+    const start = new Date(startDate)
+    const end = new Date(start.getTime() + days * 24 * 60 * 60 * 1000)
+    return end.toISOString().split('T')[0]
+  }
 
   if (loading) {
     return (
@@ -363,9 +436,11 @@ export default function MemberProfilePage() {
       <style>{`
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes slideDown { from { transform: translateY(-4px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .animate-fade { animation: fadeIn 0.4s ease-out forwards; }
         .animate-tab { animation: fadeIn 0.2s ease-out forwards; }
         .animate-modal { animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .animate-dropdown { animation: slideDown 0.15s ease-out; }
       `}</style>
       
       {/* TOP ROW: Header */}
@@ -376,23 +451,48 @@ export default function MemberProfilePage() {
         >
           <span>←</span> Members
         </button>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           {(member?.status === "INACTIVE" || isExpired) && (
             <button
-              onClick={() => setShowRenewalModal(true)}
-              className="bg-[#D11F00] hover:bg-[#B51A00] text-white font-bold text-[12px] tracking-[0.1em] uppercase px-5 py-2.5 rounded-lg transition-all cursor-pointer active:scale-[0.98]"
+              onClick={() => {
+                setShowRenewalModal(true)
+                setDropdownOpen(false)
+              }}
+              className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] tracking-widest uppercase px-4 py-2.5 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
             >
-              Renew Membership
+              Renew
             </button>
           )}
           <button
             onClick={() => setShowEditModal(true)}
-            className="bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] text-[12px] font-bold tracking-[0.1em] uppercase px-5 py-2.5 rounded-lg transition-all cursor-pointer"
+            className="bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] text-[12px] font-bold tracking-widest uppercase px-5 py-2.5 rounded-lg transition-all cursor-pointer"
           >
-            Edit Member
+            Edit
+          </button>
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            className="bg-[#D11F00]/10 border border-[#D11F00]/30 text-[#D11F00] hover:bg-[#D11F00]/20 hover:border-[#D11F00]/50 text-[12px] font-bold tracking-widest uppercase px-5 py-2.5 rounded-lg transition-all cursor-pointer"
+          >
+            Delete
           </button>
         </div>
       </div>
+
+      {/* EXPIRED BANNER */}
+      {member?.status === "INACTIVE" && (
+        <div className="bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-xl px-5 py-4 mb-4 flex justify-between items-center animate-fade">
+          <div>
+            <p className="text-[#F59E0B] font-bold text-[14px]">⚠ Membership Expired</p>
+            <p className="text-[#888888] text-[12px] mt-0.5">Expired on {formatDate(member.endDate)}</p>
+          </div>
+          <button
+            onClick={() => setShowRenewalModal(true)}
+            className="bg-[#F59E0B] hover:bg-[#D97706] text-black font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
+          >
+            Renew Now →
+          </button>
+        </div>
+      )}
 
       {/* MEMBER INFO CARD */}
       <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 flex flex-col md:flex-row gap-6 items-start animate-fade">
@@ -546,7 +646,7 @@ export default function MemberProfilePage() {
                     </td>
                   </tr>
                 ) : (
-                  attendance.records.map((record) => {
+                  attendance.records.map((record: AttendanceRecord) => {
                     const isOngoing = !record.checkedOutAt && !record.autoClosed;
                     const durationStr = record.durationMinutes 
                       ? `${Math.floor(record.durationMinutes / 60)}hr ${record.durationMinutes % 60}min`.replace("0hr ", "")
@@ -639,7 +739,7 @@ export default function MemberProfilePage() {
                     </td>
                   </tr>
                 ) : (
-                  payments.map(pay => {
+                  payments.map((pay: PaymentRecord) => {
                     const modeColor = pay.mode === "CASH" ? "bg-[#10B981]/10 text-[#10B981]" : pay.mode === "UPI" ? "bg-[#3B82F6]/10 text-[#3B82F6]" : "bg-[#8B5CF6]/10 text-[#8B5CF6]"
                     return (
                       <tr key={pay.id} className="border-b border-[#0D0D0D] hover:bg-[#0D0D0D] transition-colors">
@@ -669,7 +769,7 @@ export default function MemberProfilePage() {
             <div className="border-t border-[#1C1C1C] px-6 py-4 flex items-center justify-between bg-[#0A0A0A]">
               <span className="text-[#444444] font-bold uppercase tracking-wider text-[11px]">Total Paid</span>
               <span className="text-white font-black text-[16px]">
-                ₹{payments.reduce((sum, p) => sum + p.amount, 0).toLocaleString('en-IN')}
+                ₹{payments.reduce((sum: number, p: PaymentRecord) => sum + p.amount, 0).toLocaleString('en-IN')}
               </span>
             </div>
           )}
@@ -971,6 +1071,144 @@ export default function MemberProfilePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* RENEWAL MODAL */}
+      {showRenewalModal && member && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setShowRenewalModal(false)} />
+          <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[440px] w-full relative z-10 animate-modal shadow-2xl shadow-black/50 overflow-y-auto max-h-[90vh]">
+            <h2 className="text-white text-[18px] font-black tracking-tight">Renew Membership</h2>
+            <p className="text-[#444444] text-[13px] mt-1">{member.name}</p>
+            
+            <div className="border-t border-[#1C1C1C] my-4" />
+            
+            <div className="space-y-5">
+              <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-widest uppercase block mb-1.5">Membership Plan</label>
+                <select
+                  value={renewForm.membershipType}
+                  onChange={(e) => {
+                    const newType = e.target.value
+                    setRenewForm(prev => ({ ...prev, membershipType: newType }))
+                    fetchPlanPrice(newType)
+                  }}
+                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 cursor-pointer appearance-none"
+                >
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="QUARTERLY">Quarterly</option>
+                  <option value="HALF_YEARLY">Half-Yearly</option>
+                  <option value="ANNUAL">Annual</option>
+                  <option value="PERSONAL_TRAINING">Personal Training</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-widest uppercase block mb-1.5">Start Date</label>
+                <input
+                  type="date"
+                  value={renewForm.startDate}
+                  onChange={(e) => setRenewForm(prev => ({ ...prev, startDate: e.target.value }))}
+                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-3 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 scheme-dark cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className={`text-[10px] font-bold tracking-widest uppercase block mb-1.5 ${renewForm.membershipType === "PERSONAL_TRAINING" ? "text-[#555555]" : "text-[#333333]"}`}>End Date</label>
+                {renewForm.membershipType === "PERSONAL_TRAINING" ? (
+                  <input
+                    type="date"
+                    value={renewForm.endDate}
+                    onChange={(e) => setRenewForm(prev => ({ ...prev, endDate: e.target.value }))}
+                    className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-3 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 scheme-dark cursor-pointer"
+                    required
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    disabled
+                    value={calculateEndDate(renewForm.startDate, renewForm.membershipType)}
+                    className="w-full bg-[#0F0F0F] border border-[#242424] text-[#555555] text-[14px] rounded-lg px-3 py-3 opacity-50 cursor-not-allowed scheme-dark"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-widest uppercase block mb-1.5">Plan Amount</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
+                  <input
+                    type="number"
+                    value={renewForm.customPrice}
+                    onChange={(e) => setRenewForm(prev => ({ ...prev, customPrice: Number(e.target.value) }))}
+                    className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-medium"
+                  />
+                </div>
+              </div>
+
+              {renewError && (
+                <p className="text-[#D11F00] text-[12px] mt-2">{renewError}</p>
+              )}
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowRenewalModal(false)}
+                  className="w-1/3 bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] font-bold text-[12px] tracking-widest uppercase py-3 rounded-lg transition-all duration-200 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRenewal}
+                  disabled={renewLoading}
+                  className={`w-2/3 text-white font-bold text-[12px] tracking-widest uppercase py-3 rounded-lg transition-all duration-200 flex items-center justify-center
+                    ${renewLoading ? "bg-[#D11F00] opacity-70 cursor-not-allowed" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
+                  `}
+                >
+                  {renewLoading ? "Renewing..." : "Renew Membership"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {showDeleteModal && member && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setShowDeleteModal(false)} />
+          <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[400px] w-full relative z-10 animate-modal shadow-2xl shadow-black/50">
+            <h2 className="text-white text-[18px] font-black tracking-tight">Delete Member</h2>
+            
+            <p className="text-[#444444] text-[13px] mt-3">
+              Are you sure you want to delete <span className="font-bold text-white">{member.name}</span>?
+            </p>
+
+            <div className="bg-[#D11F00]/10 border border-[#D11F00]/20 rounded-lg px-4 py-3 mt-4">
+              <p className="text-[#D11F00] text-[12px]">
+                Their attendance and payment history will be preserved but they will be hidden from all lists.
+              </p>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] font-bold text-[12px] tracking-widest uppercase px-6 py-3 rounded-lg transition-all duration-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleteLoading}
+                className={`flex-1 text-white font-black text-[12px] tracking-widest uppercase px-6 py-3 rounded-lg transition-all duration-200 flex items-center justify-center
+                  ${deleteLoading ? "bg-[#D11F00] opacity-70 cursor-not-allowed" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
+                `}
+              >
+                {deleteLoading ? "Deleting..." : "Delete"}
+              </button>
+            </div>
           </div>
         </div>
       )}
