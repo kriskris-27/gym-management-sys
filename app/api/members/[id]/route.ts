@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { MemberUpdateSchema } from "@/lib/validations"
-import { Prisma } from "@prisma/client"
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library"
 
 /**
  * GET: Retrieve single member with attendance stats
@@ -48,7 +46,7 @@ export async function GET(
 
     const periodStart = member.lastRenewalAt ?? member.startDate
 
-    const paymentWhere: Prisma.PaymentWhereInput = {
+    const paymentWhere: any = {
       memberId: member.id,
       createdAt: { gte: periodStart }
     }
@@ -116,8 +114,8 @@ export async function PUT(
     }
 
     // 2. Prepare payload
-    const finalUpdatePayload: Prisma.MemberUpdateInput = { ...updateData }
-    const { id: _, ...payloadWithoutId } = finalUpdatePayload as Prisma.MemberUpdateInput & { id?: unknown }
+    const finalUpdatePayload: any = { ...updateData }
+    const { id: _, ...payloadWithoutId } = finalUpdatePayload as any & { id?: unknown }
     Object.assign(finalUpdatePayload, payloadWithoutId)
     
     // Status can only be changed via DELETE and PATCH
@@ -171,7 +169,7 @@ export async function PUT(
 
   } catch (error) {
     // Catch-all for duplicate phone numbers across different IDs
-    if (error instanceof PrismaClientKnownRequestError && error.code === "P2002") {
+    if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
       return NextResponse.json(
         { error: "Member with this phone already exists" }, 
         { status: 409 }

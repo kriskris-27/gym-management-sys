@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { MemberCreateSchema } from "@/lib/validations"
-import { Prisma, MembershipType, MemberStatus } from "@prisma/client"
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library"
 
 /**
  * GET: List all members with filtering and search
@@ -15,11 +13,11 @@ export async function GET(request: Request) {
   const status = searchParams.get("status")
 
   try {
-    const where: Prisma.MemberWhereInput = {}
+    const where: any = {}
 
     // Status filtering (allow ACTIVE/INACTIVE/DELETED)
     if (status && ["ACTIVE", "INACTIVE", "DELETED"].includes(status)) {
-      where.status = status as MemberStatus
+      where.status = status as "ACTIVE" | "INACTIVE" | "DELETED"
     } else if (!status) {
       // Default: exclude DELETED members
       where.status = { not: "DELETED" }
@@ -151,10 +149,11 @@ export async function POST(request: Request) {
         QUARTERLY: 90,
         HALF_YEARLY: 180,
         ANNUAL: 365,
+        PERSONAL_TRAINING: 365, // Default for personal training if no end date specified
       }
       endDate = addDaysUTC(
         data.startDate.toISOString().split("T")[0],
-        daysMap[data.membershipType as keyof typeof daysMap]
+        daysMap[data.membershipType as "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"]
       )
     }
 
@@ -202,7 +201,7 @@ export async function POST(request: Request) {
 
     // Handle specific Prisma duplicate constraint
     // Using property check instead of instanceof for better reliability with pnpm symlinks
-    if (error instanceof PrismaClientKnownRequestError && error.code === "P2002") {
+    if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
       return NextResponse.json(
         { error: "Member with this phone already exists" },
         { status: 409 }

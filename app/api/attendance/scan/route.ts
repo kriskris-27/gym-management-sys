@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { AttendanceScanSchema } from "@/lib/validations"
-import { Prisma } from "@prisma/client"
 
 import { getISTDateRange, calcDuration, formatDuration } from "@/lib/utils"
 
@@ -83,7 +82,7 @@ export async function POST(request: Request) {
 
     // CASE: No records at all OR Latest was yesterday and is already closed
     if (!latestRecord || (!isLatestToday && latestRecord.checkedOutAt)) {
-      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await prisma.$transaction(async (tx) => {
         const existing = await tx.attendance.findFirst({
           where: {
             memberId: member.id,

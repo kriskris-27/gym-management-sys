@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { PricingUpdateSchema } from "@/lib/validations"
-import { MembershipType, Prisma } from "@prisma/client"
 
-const ORDER: MembershipType[] = [
+const ORDER: ("MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING")[] = [
   "MONTHLY",
   "QUARTERLY",
   "HALF_YEARLY",
@@ -43,9 +42,9 @@ export async function PUT(request: Request) {
     const inputPricing = validated.data.pricing
 
     // Deduplicate by membershipType (last wins)
-    const uniqueMap = new Map<MembershipType, number>()
+    const uniqueMap = new Map<"MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING", number>()
     for (const p of inputPricing) {
-      uniqueMap.set(p.membershipType as MembershipType, p.amount)
+      uniqueMap.set(p.membershipType as "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING", p.amount)
     }
 
     const recordsToUpdate = Array.from(uniqueMap.entries()).map(([type, amount]) => ({

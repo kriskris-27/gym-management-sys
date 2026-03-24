@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { PaymentCreateSchema } from "@/lib/validations"
-import { Prisma, PaymentMode } from "@prisma/client"
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library"
 
 /**
  * GET: Retrieve payments list with optional filtering
@@ -16,7 +14,7 @@ export async function GET(request: Request) {
   const mode = searchParams.get("mode")
 
   try {
-    const where: Prisma.PaymentWhereInput = {}
+    const where: any = {}
 
     // Link by specific member
     if (memberId) where.memberId = memberId
@@ -48,7 +46,7 @@ export async function GET(request: Request) {
 
     // Validate and apply Payment Mode Filter
     if (mode && ["CASH", "UPI", "CARD"].includes(mode)) {
-      where.mode = mode as PaymentMode
+      where.mode = mode as "CASH" | "UPI" | "CARD"
     }
 
     // Pagination
@@ -152,7 +150,7 @@ export async function POST(request: Request) {
 
   } catch (error) {
     // Catch specifically for non-existent member IDs
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error && typeof error === "object" && "code" in error) {
       if (error.code === "P2025") {
         return NextResponse.json({ error: "Member not found" }, { status: 404 })
       }
