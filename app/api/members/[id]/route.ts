@@ -117,7 +117,8 @@ export async function PUT(
 
     // 2. Prepare payload
     const finalUpdatePayload: Prisma.MemberUpdateInput = { ...updateData }
-    delete (finalUpdatePayload as any).id
+    const { id: _, ...payloadWithoutId } = finalUpdatePayload as Prisma.MemberUpdateInput & { id?: unknown }
+    Object.assign(finalUpdatePayload, payloadWithoutId)
     
     // Status can only be changed via DELETE and PATCH
     delete finalUpdatePayload.status

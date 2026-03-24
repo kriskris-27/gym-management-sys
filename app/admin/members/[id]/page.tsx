@@ -45,6 +45,18 @@ interface PaymentRecord {
   notes: string | null
 }
 
+interface PricingPlan {
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  amount: number
+}
+
+interface RenewalFormData {
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  startDate: string
+  endDate?: string
+  customPrice?: number
+}
+
 const paymentSchema = z.object({
   amount: z.preprocess((val) => Number(val), z.number().min(1).max(99999)),
   date: z.string().min(1),
@@ -184,7 +196,7 @@ export default function MemberProfilePage() {
       const res = await fetch("/api/settings/pricing")
       if (res.ok) {
         const data = await res.json()
-        const plan = data.pricing.find((p: any) => p.membershipType === type)
+        const plan = data.pricing.find((p: PricingPlan) => p.membershipType === type)
         setRenewForm(prev => ({
           ...prev,
           customPrice: plan?.amount ?? 0
@@ -222,8 +234,8 @@ export default function MemberProfilePage() {
     return istNow.toISOString().split("T")[0]
   }
   const { register: regPayment, handleSubmit: handlePaymentSubmit, reset: resetPayment, watch: watchPayment, setValue: setPaymentValue, formState: { errors: payErrors, isSubmitting: isPaying } } = useForm<PaymentFormData>({
-    resolver: zodResolver(paymentSchema) as any,
-    defaultValues: { date: getTodayStr(), mode: "UPI" as any }
+    resolver: zodResolver(paymentSchema),
+    defaultValues: { date: getTodayStr(), mode: "UPI" }
   })
   const watchedAmount = watchPayment("amount")
   const [paymentSuccess, setPaymentSuccess] = useState(false)
@@ -312,11 +324,11 @@ export default function MemberProfilePage() {
 
   // Renewal Form Hook
   const [renewalSuccess, setRenewalSuccess] = useState(false)
-  const { register: regRenewal, handleSubmit: handleRenewalSubmit, reset: resetRenewal, watch: watchRenewal, setValue: setRenewalValue, formState: { errors: renewalErrors, isSubmitting: isRenewing } } = useForm({
+  const { register: regRenewal, handleSubmit: handleRenewalSubmit, reset: resetRenewal, watch: watchRenewal, setValue: setRenewalValue, formState: { errors: renewalErrors, isSubmitting: isRenewing } } = useForm<RenewalFormData>({
     defaultValues: { membershipType: member?.membershipType || "MONTHLY", startDate: getTodayStr(), customPrice: undefined }
   })
-  const renewalMembershipType = watchRenewal("membershipType" as any)
-  const renewalStartDate = watchRenewal("startDate" as any)
+  const renewalMembershipType = watchRenewal("membershipType")
+  const renewalStartDate = watchRenewal("startDate")
   const [calculatedEndDate, setCalculatedEndDate] = useState<string>("")
 
   useEffect(() => {
@@ -343,9 +355,9 @@ export default function MemberProfilePage() {
     }
   }, [member, showRenewalModal, resetRenewal])
 
-  const onRenewalSubmit = async (data: any) => {
+  const onRenewalSubmit = async (data: RenewalFormData) => {
     try {
-      const payload: any = {
+      const payload = {
         action: "renew",
         membershipType: data.membershipType,
         startDate: data.startDate,
@@ -799,7 +811,7 @@ export default function MemberProfilePage() {
               <div className="bg-[#0F0F0F] border border-[#1C1C1C] rounded-lg px-4 py-3 mb-6 h-12 animate-pulse" />
             )}
             
-            <form onSubmit={handlePaymentSubmit(onPaymentSubmit as any)} className="space-y-5">
+            <form onSubmit={handlePaymentSubmit(onPaymentSubmit)} className="space-y-5">
               <div>
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Amount</label>
                 <div className="relative">
@@ -815,7 +827,7 @@ export default function MemberProfilePage() {
                 {paymentSummary && paymentSummary.remaining > 0 && (
                   <button
                     type="button"
-                    onClick={() => setPaymentValue("amount", paymentSummary.remaining as any)}
+                    onClick={() => setPaymentValue("amount", paymentSummary.remaining)}
                     className="text-[#D11F00] text-[11px] mt-1.5 underline underline-offset-2 hover:text-[#FF3A1A] transition-colors cursor-pointer"
                   >
                     Pay remaining ₹{paymentSummary.remaining.toLocaleString('en-IN')}
@@ -903,7 +915,7 @@ export default function MemberProfilePage() {
               <div>
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Plan</label>
                 <select
-                  {...regRenewal("membershipType" as any)}
+                  {...regRenewal("membershipType")}
                   className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 cursor-pointer appearance-none"
                 >
                   <option value="MONTHLY">Monthly</option>
@@ -917,7 +929,7 @@ export default function MemberProfilePage() {
               <div>
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Start Date</label>
                 <input
-                  {...regRenewal("startDate" as any)}
+                  {...regRenewal("startDate")}
                   type="date"
                   className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-3 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 [color-scheme:dark] cursor-pointer"
                 />
@@ -927,7 +939,7 @@ export default function MemberProfilePage() {
                 <label className={`text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5 ${renewalMembershipType === "PERSONAL_TRAINING" ? "text-[#555555]" : "text-[#333333]"}`}>End Date</label>
                 {renewalMembershipType === "PERSONAL_TRAINING" ? (
                   <input
-                    {...regRenewal("endDate" as any)}
+                    {...regRenewal("endDate")}
                     type="date"
                     className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-3 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 [color-scheme:dark] cursor-pointer"
                     required
@@ -947,7 +959,7 @@ export default function MemberProfilePage() {
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
                   <input
-                    {...regRenewal("customPrice" as any)}
+                    {...regRenewal("customPrice")}
                     type="number"
                     placeholder="Auto-filled from plan"
                     className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-medium"

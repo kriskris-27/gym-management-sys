@@ -178,7 +178,7 @@ export default function DashboardPage() {
             {/* LEFT: Today's Attendance Table */}
             <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 animate-fadeUp [animation-delay:0.5s] opacity-0 flex flex-col h-full min-h-[400px]">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-white font-bold text-[15px]">Today's Attendance</h2>
+                <h2 className="text-white font-bold text-[15px]">Today&apos;s Attendance</h2>
                 <button 
                   onClick={fetchData}
                   className="text-[#444444] hover:text-[#D11F00] transition-colors flex items-center justify-center p-1 rounded-md"

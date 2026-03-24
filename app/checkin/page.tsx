@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { formatDuration } from "@/lib/utils"
 
@@ -139,13 +139,19 @@ function CheckinContent() {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved && PHONE_REGEX.test(saved)) {
       autoCheckinStarted = true
-      void handleScan(saved)
+      // Use setTimeout to avoid calling setState synchronously in effect
+      setTimeout(() => {
+        void handleScan(saved)
+      }, 0)
     }
   }, [isManualMode, handleScan])
 
   useEffect(() => {
     if (!isManualMode) {
-      setManualCountdown(null)
+      // Use setTimeout to avoid calling setState synchronously in effect
+      setTimeout(() => {
+        setManualCountdown(null)
+      }, 0)
       return
     }
     if (
@@ -153,12 +159,18 @@ function CheckinContent() {
       status !== "checked_out" &&
       status !== "already_done"
     ) {
-      setManualCountdown(null)
+      // Use setTimeout to avoid calling setState synchronously in effect
+      setTimeout(() => {
+        setManualCountdown(null)
+      }, 0)
       return
     }
 
     let n = 5
-    setManualCountdown(n)
+    // Use setTimeout to avoid calling setState synchronously in effect
+    setTimeout(() => {
+      setManualCountdown(n)
+    }, 0)
     const id = window.setInterval(() => {
       n -= 1
       setManualCountdown(n)

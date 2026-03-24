@@ -97,6 +97,49 @@ const PLAN_ORDER = [
   "PERSONAL_TRAINING",
 ] as const
 
+function formatBarTooltipLabel(dateStr: string) {
+  const d = new Date(dateStr + "T12:00:00+05:30")
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
+}
+
+function formatHourTick(h: number) {
+  if (h === 0) return "12AM"
+  if (h < 12) return `${h}AM`
+  if (h === 12) return "12PM"
+  return `${h - 12}PM`
+}
+
+const PEAK_HOUR_RANGE = Array.from({ length: 18 }, (_, i) => i + 5)
+const LABEL_HOURS = new Set([5, 8, 11, 14, 17, 20])
+
+type MonthlyReport = {
+  period: { year: number; month: number; label: string }
+  revenue: {
+    total: number
+    byPlan: Record<string, number>
+    byMode: { CASH: number; UPI: number; CARD: number }
+    dailyBreakdown: { date: string; amount: number; count: number }[]
+  }
+  members: {
+    newThisMonth: number
+    renewalsThisMonth: number
+    activeTotal: number
+    expiredThisMonth: number
+  }
+  attendance: {
+    totalSessions: number
+    uniqueMembers: number
+    averageSessionMinutes: number
+    dailyBreakdown: { date: string; count: number; averageDuration: number }[]
+    peakHour: number
+    hourHeatmap: number[]
+  }
+}
+
 const PLAN_COLORS: Record<(typeof PLAN_ORDER)[number], string> = {
   MONTHLY: "#D11F00",
   QUARTERLY: "#F59E0B",
@@ -159,48 +202,45 @@ function formatRupeeTick(v: number) {
   return `₹${v}`
 }
 
-function formatBarTooltipLabel(dateStr: string) {
-  const d = new Date(dateStr + "T12:00:00+05:30")
-  return d.toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    timeZone: "Asia/Kolkata",
-  })
+interface TooltipPayload {
+  payload: { date: string; amount: number; count?: number }
 }
 
-function formatHourTick(h: number) {
-  if (h === 0) return "12AM"
-  if (h < 12) return `${h}AM`
-  if (h === 12) return "12PM"
-  return `${h - 12}PM`
+const BarTooltip = ({
+  active,
+  payload,
+}: {
+  active?: boolean
+  payload?: TooltipPayload[]
+}) => {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  const label = formatBarTooltipLabel(p.date)
+  return (
+    <div
+      className="rounded-lg border border-[#2A2A2A] bg-[#1C1C1C] px-3 py-2 text-[12px] text-white shadow-lg"
+    >
+      <div className="font-bold">{label}</div>
+      <div>Revenue: ₹{p.amount.toLocaleString("en-IN")}</div>
+    </div>
+  )
 }
 
-const PEAK_HOUR_RANGE = Array.from({ length: 18 }, (_, i) => i + 5)
-
-const LABEL_HOURS = new Set([5, 8, 11, 14, 17, 20])
-
-type MonthlyReport = {
-  period: { year: number; month: number; label: string }
-  revenue: {
-    total: number
-    byPlan: Record<string, number>
-    byMode: { CASH: number; UPI: number; CARD: number }
-    dailyBreakdown: { date: string; amount: number; count: number }[]
-  }
-  members: {
-    newThisMonth: number
-    renewalsThisMonth: number
-    activeTotal: number
-    expiredThisMonth: number
-  }
-  attendance: {
-    totalSessions: number
-    uniqueMembers: number
-    averageSessionMinutes: number
-    dailyBreakdown: { date: string; count: number; averageDuration: number }[]
-    peakHour: number
-    hourHeatmap: number[]
-  }
+const LineTooltip = ({
+  active,
+  payload,
+}: {
+  active?: boolean
+  payload?: TooltipPayload[]
+}) => {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  const label = formatBarTooltipLabel(p.date)
+  return (
+    <div className="rounded-lg border border-[#2A2A2A] bg-[#1C1C1C] px-3 py-2 text-[12px] text-white shadow-lg">
+      {label}: {p.count} visits
+    </div>
+  )
 }
 
 export default function AdminReportsPage() {
@@ -212,12 +252,11 @@ export default function AdminReportsPage() {
   const data = rawData as MonthlyReport | undefined
 
   useEffect(() => {
-    setBarsReady(false)
-    const t = requestAnimationFrame(() => {
+    const timer = setTimeout(() => {
       setBarsReady(true)
-    })
-    return () => cancelAnimationFrame(t)
-  }, [year, month, data?.revenue?.total])
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [year, month])
 
   const isEmptyMonth = useMemo(() => {
     if (!data) return false
@@ -279,43 +318,6 @@ export default function AdminReportsPage() {
     avgMins === 0 ? "—" : `${hrs}hr ${mins}min`
 
   const chartKey = `${year}-${month}`
-
-  const BarTooltip = ({
-    active,
-    payload,
-  }: {
-    active?: boolean
-    payload?: { payload: { date: string; amount: number } }[]
-  }) => {
-    if (!active || !payload?.length) return null
-    const p = payload[0].payload
-    const label = formatBarTooltipLabel(p.date)
-    return (
-      <div
-        className="rounded-lg border border-[#2A2A2A] bg-[#1C1C1C] px-3 py-2 text-[12px] text-white shadow-lg"
-        style={{ outline: "none" }}
-      >
-        {label}: ₹{p.amount.toLocaleString("en-IN")}
-      </div>
-    )
-  }
-
-  const LineTooltip = ({
-    active,
-    payload,
-  }: {
-    active?: boolean
-    payload?: { payload: { date: string; count: number } }[]
-  }) => {
-    if (!active || !payload?.length) return null
-    const p = payload[0].payload
-    const label = formatBarTooltipLabel(p.date)
-    return (
-      <div className="rounded-lg border border-[#2A2A2A] bg-[#1C1C1C] px-3 py-2 text-[12px] text-white shadow-lg">
-        {label}: {p.count} visits
-      </div>
-    )
-  }
 
   if (isError && !isLoading) {
     return (

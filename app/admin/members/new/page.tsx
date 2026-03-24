@@ -26,6 +26,11 @@ const schema = z.object({
   path: ["endDate"]
 })
 
+interface PricingPlan {
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  amount: number
+}
+
 type FormData = z.infer<typeof schema>
 
 export default function AddMemberPage() {
@@ -48,7 +53,7 @@ export default function AddMemberPage() {
     try {
       const res = await fetch("/api/settings/pricing")
       const data = await res.json()
-      const plan = data.pricing?.find((p: any) => p.membershipType === type)
+      const plan = data.pricing?.find((p: PricingPlan) => p.membershipType === type)
       setValue("customPrice", plan?.amount ?? 0, { shouldValidate: false })
     } catch {
       setValue("customPrice", 0)
@@ -65,7 +70,7 @@ export default function AddMemberPage() {
     setError,
     formState: { errors }
   } = useForm<FormData>({
-    resolver: zodResolver(schema) as any,
+    resolver: zodResolver(schema),
     defaultValues: {
       membershipType: "MONTHLY",
       customPrice: 0,
