@@ -72,10 +72,10 @@ export async function GET(request: Request) {
     }
 
     const renewalsThisMonth = payments.filter(
-      (p) => p.member.createdAt < startOfMonth
+      (p: any) => p.member.createdAt < startOfMonth
     ).length
 
-    payments.forEach(p => {
+    payments.forEach((p: any) => {
       revenue.total += p.amount
       revenue.byMode[p.mode as keyof typeof revenue.byMode] += p.amount
       
@@ -93,14 +93,14 @@ export async function GET(request: Request) {
     // 4. TRAFFIC PROCESSING
     const traffic = {
       totalSessions: attendance.length,
-      uniqueHeadcount: new Set(attendance.map(a => a.memberId)).size,
+      uniqueHeadcount: new Set(attendance.map((a: any) => a.memberId)).size,
       accumulatedDuration: 0,
       durationCount: 0,
       dailySummary: {} as Record<string, { count: number; totalDuration: number; durationCount: number }>,
       hourHeatmap: {} as Record<number, number>
     }
 
-    attendance.forEach(a => {
+    attendance.forEach((a: any) => {
       const dateKey = a.checkedInAt.toISOString().split('T')[0]
       if (!traffic.dailySummary[dateKey]) {
         traffic.dailySummary[dateKey] = { count: 0, totalDuration: 0, durationCount: 0 }
@@ -120,7 +120,7 @@ export async function GET(request: Request) {
     })
 
     // Identify busiest hour
-    const peakHourEntry = Object.entries(traffic.hourHeatmap).sort(([, a], [, b]) => b - a)[0]
+    const peakHourEntry = Object.entries(traffic.hourHeatmap).sort(([, a]: [string, number], [, b]: [string, number]) => b - a)[0]
     const peakHour = peakHourEntry ? parseInt(peakHourEntry[0]) : 0
 
     // Readable Label
@@ -137,7 +137,7 @@ export async function GET(request: Request) {
         total: revenue.total,
         byPlan: revenue.byPlan,
         byMode: revenue.byMode,
-        dailyBreakdown: Object.entries(revenue.dailySummary).map(([date, stats]) => ({ date, ...stats }))
+        dailyBreakdown: Object.entries(revenue.dailySummary).map(([date, stats]: [string, any]) => ({ date, ...stats }))
       },
       members: {
         newThisMonth: newMembersCount,

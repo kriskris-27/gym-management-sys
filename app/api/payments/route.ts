@@ -68,7 +68,7 @@ export async function GET(request: Request) {
       prisma.payment.count({ where })
     ])
 
-    const formattedPayments = payments.map(p => ({
+    const formattedPayments = payments.map((p: any) => ({
       id: p.id,
       memberId: p.memberId,
       memberName: p.member.name,

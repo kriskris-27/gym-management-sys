@@ -40,18 +40,18 @@ export async function GET() {
 
     // Filter out deleted members
     const activeRecords = records.filter(
-      r => r.member.status !== "DELETED"
+      (r: any) => r.member.status !== "DELETED"
     )
 
     // Count unique members present today
-    const totalPresent = new Set(activeRecords.map((r) => r.memberId)).size
+    const totalPresent = new Set(activeRecords.map((r: any) => r.memberId)).size
 
     // Count members currently inside (no checkout)
     const currentlyInside = activeRecords.filter(
-      r => !r.checkedOutAt
+      (r: any) => !r.checkedOutAt
     ).length
 
-    const formattedRecords = activeRecords.map((record) => {
+    const formattedRecords = activeRecords.map((record: any) => {
       const isOngoing = !record.checkedOutAt
       
       // Use stored duration for closed sessions, calculate live for ongoing

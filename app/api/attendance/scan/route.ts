@@ -82,7 +82,7 @@ export async function POST(request: Request) {
 
     // CASE: No records at all OR Latest was yesterday and is already closed
     if (!latestRecord || (!isLatestToday && latestRecord.checkedOutAt)) {
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: any) => {
         const existing = await tx.attendance.findFirst({
           where: {
             memberId: member.id,
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
 
     // CASE: Open record from PREVIOUS day (Forgot to check out)
     if (!latestRecord.checkedOutAt && !isLatestToday) {
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: any) => {
         await tx.attendance.update({
           where: { id: latestRecord.id },
           data: { checkedOutAt: now, autoClosed: true }
@@ -189,7 +189,7 @@ export async function POST(request: Request) {
           durationFormatted: formatDuration(gap),
         })
       } else { // >= 4 hours → Auto-close + New Session
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: any) => {
           await tx.attendance.update({
             where: { id: latestRecord.id },
             data: { checkedOutAt: now, autoClosed: true }

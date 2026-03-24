@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     if (expiredMembers.length > 0) {
       await prisma.member.updateMany({
         where: {
-          id: { in: expiredMembers.map(m => m.id) }
+          id: { in: expiredMembers.map((m: any) => m.id) }
         },
         data: { status: "INACTIVE" }
       })
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     if (renewedMembers.length > 0) {
       await prisma.member.updateMany({
         where: {
-          id: { in: renewedMembers.map(m => m.id) }
+          id: { in: renewedMembers.map((m: any) => m.id) }
         },
         data: { status: "ACTIVE" }
       })

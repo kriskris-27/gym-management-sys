@@ -1,8 +1,10 @@
-import { PrismaClient } from "@prisma/client"
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { PrismaClient } = require("@prisma/client") as any
 
 import bcrypt from "bcryptjs"
 
-const prisma = new PrismaClient()
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const prisma = new (PrismaClient as any)()
 
 async function main() {
   const hashedPassword = await bcrypt.hash("admin123", 10)

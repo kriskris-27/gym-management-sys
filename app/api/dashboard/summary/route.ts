@@ -85,21 +85,21 @@ export async function GET() {
 
     // POST-QUERY PROCESSING
     // Unique members who visited today
-    const totalPresent = new Set(todayAttendance.map(a => a.memberId)).size
+    const totalPresent = new Set(todayAttendance.map((a: any) => a.memberId)).size
     // Count of members currently checked in
-    const currentlyInside = todayAttendance.filter(a => !a.checkedOutAt).length
+    const currentlyInside = todayAttendance.filter((a: any) => !a.checkedOutAt).length
 
     // Structure membership stats
     const statsByStatus = {
-      ACTIVE: statusCounts.find(s => s.status === 'ACTIVE')?._count._all || 0,
-      INACTIVE: statusCounts.find(s => s.status === 'INACTIVE')?._count._all || 0
+      ACTIVE: statusCounts.find((s: any) => s.status === 'ACTIVE')?._count._all || 0,
+      INACTIVE: statusCounts.find((s: any) => s.status === 'INACTIVE')?._count._all || 0
     }
 
     const membersResponse = {
       total: statsByStatus.ACTIVE + statsByStatus.INACTIVE,
       active: statsByStatus.ACTIVE,
       inactive: statsByStatus.INACTIVE,
-      expiringSoon: expiringMembers.map(m => {
+      expiringSoon: expiringMembers.map((m: any) => {
         const diff = m.endDate.getTime() - now.getTime()
         const daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24))
         return {
@@ -117,7 +117,7 @@ export async function GET() {
         date: istDateStr,
         totalPresent,
         currentlyInside,
-        attendance: todayAttendance.map(a => ({
+        attendance: todayAttendance.map((a: any) => ({
           memberId: a.memberId,
           memberName: a.member.name,
           checkedInAt: a.checkedInAt.toISOString(),

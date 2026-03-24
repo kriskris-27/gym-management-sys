@@ -16,7 +16,7 @@ export async function GET() {
       select: { membershipType: true, amount: true }
     })
 
-    const dbMap = new Map(pricingFromDb.map((p) => [p.membershipType, p.amount]))
+    const dbMap = new Map(pricingFromDb.map((p: any) => [p.membershipType, p.amount]))
 
     const pricing = ORDER.map(type => ({
       membershipType: type,
@@ -70,7 +70,7 @@ export async function PUT(request: Request) {
     
     // Sort array in memory
     const updatedPricing = ORDER
-      .map(type => pricingFromDb.find((p) => p.membershipType === type) || { membershipType: type, amount: 0 })
+      .map(type => pricingFromDb.find((p: any) => p.membershipType === type) || { membershipType: type, amount: 0 })
 
     return NextResponse.json({ success: true, pricing: updatedPricing })
 

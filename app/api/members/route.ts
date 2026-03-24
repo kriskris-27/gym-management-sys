@@ -52,10 +52,10 @@ export async function GET(request: Request) {
     // Fetch all plan prices once
     const planPrices = await prisma.planPricing.findMany()
     const priceMap = Object.fromEntries(
-      planPrices.map((p) => [p.membershipType, p.amount])
+      planPrices.map((p: any) => [p.membershipType, p.amount])
     )
 
-    const memberIds = members.map((m) => m.id)
+    const memberIds = members.map((m: any) => m.id)
     const periodPayments =
       memberIds.length > 0
         ? await prisma.payment.findMany({
@@ -64,9 +64,9 @@ export async function GET(request: Request) {
           })
         : []
 
-    const enriched = members.map((m) => {
+    const enriched = members.map((m: any) => {
       const totalPaid = periodPayments
-        .filter(p => {
+        .filter((p: any) => {
           const periodStart = m.lastRenewalAt ?? m.startDate
           
           // Use createdAt for period start comparison (has timestamp precision)
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
             
           return p.memberId === m.id && afterStart && beforeEnd
         })
-        .reduce((sum, p) => sum + p.amount, 0)
+        .reduce((sum: number, p: any) => sum + p.amount, 0)
 
       const dueAmount = m.customPrice !== null && m.customPrice !== undefined
         ? m.customPrice
