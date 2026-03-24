@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { formatDuration } from "@/lib/utils"
-import { Attendance } from "@prisma/client"
 
 /**
  * GET: Returns full attendance history for one member
@@ -68,7 +67,7 @@ export async function GET(
       totalSessions,
       page,
       limit,
-      records: records.map((r: Pick<Attendance, 'date' | 'checkedInAt' | 'checkedOutAt' | 'durationMinutes' | 'autoClosed'>) => ({
+      records: records.map((r: { date: Date; checkedInAt: Date; checkedOutAt: Date | null; durationMinutes: number | null; autoClosed: boolean }) => ({
         date: (() => {
           const istOffset = 5.5 * 60 * 60 * 1000
           const istDate = new Date(
