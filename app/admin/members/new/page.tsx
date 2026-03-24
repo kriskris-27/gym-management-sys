@@ -13,7 +13,7 @@ const schema = z.object({
   membershipType: z.enum([
     "MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "PERSONAL_TRAINING"
   ]),
-  customPrice: z.coerce.number().min(0, "Price cannot be negative").max(99999, "Price too high"),
+  customPrice: z.number().min(0, "Price cannot be negative").max(99999, "Price too high"),
   startDate: z.string().min(1, "Start date required"),
   endDate: z.string().optional()
 }).refine(data => {

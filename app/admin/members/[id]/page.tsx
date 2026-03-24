@@ -57,8 +57,16 @@ interface RenewalFormData {
   customPrice?: number
 }
 
+interface RenewalPayload {
+  action: string
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  startDate: string
+  endDate?: string
+  customPrice?: number | undefined
+}
+
 const paymentSchema = z.object({
-  amount: z.preprocess((val) => Number(val), z.number().min(1).max(99999)),
+  amount: z.number().min(1).max(99999),
   date: z.string().min(1),
   mode: z.enum(["CASH", "UPI", "CARD"]),
   notes: z.string().max(500).optional()
@@ -69,7 +77,7 @@ const memberSchema = z.object({
   phone: z.string().regex(/^[6-9]\d{9}$/),
   membershipType: z.enum(["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "PERSONAL_TRAINING"]),
   startDate: z.string().min(1),
-  endDate: z.string().min(1),
+  endDate: z.string().optional(),
   status: z.enum(["ACTIVE", "INACTIVE", "DELETED"])
 })
 
@@ -357,7 +365,7 @@ export default function MemberProfilePage() {
 
   const onRenewalSubmit = async (data: RenewalFormData) => {
     try {
-      const payload = {
+      const payload: RenewalPayload = {
         action: "renew",
         membershipType: data.membershipType,
         startDate: data.startDate,
