@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { Prisma } from "@prisma/client"
 
 export async function GET(
   request: Request,
@@ -47,7 +48,7 @@ export async function GET(
     // Build payment filter based on status
     // Use createdAt for period start comparison (has timestamp precision)
     // Use date for end bound (visual period boundary)
-    const paymentWhere: any = {
+    const paymentWhere: Prisma.PaymentWhereInput = {
       memberId: member.id,
       createdAt: { gte: periodStart }
     }

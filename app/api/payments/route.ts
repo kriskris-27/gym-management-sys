@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { PaymentCreateSchema } from "@/lib/validations"
-import { Prisma } from "@prisma/client"
+import { Prisma, PaymentMode } from "@prisma/client"
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library"
 
 /**
  * GET: Retrieve payments list with optional filtering
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
   const mode = searchParams.get("mode")
 
   try {
-    const where: any = {}
+    const where: Prisma.PaymentWhereInput = {}
 
     // Link by specific member
     if (memberId) where.memberId = memberId
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
 
     // Validate and apply Payment Mode Filter
     if (mode && ["CASH", "UPI", "CARD"].includes(mode)) {
-      where.mode = mode
+      where.mode = mode as PaymentMode
     }
 
     // Pagination
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
 
     if (!validated.success) {
       return NextResponse.json({ 
-        error: (validated.error as any).issues[0].message 
+        error: validated.error.issues[0].message 
       }, { status: 400 })
     }
 

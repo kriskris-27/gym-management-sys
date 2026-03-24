@@ -43,8 +43,8 @@ export async function withRetry<T>(
 ): Promise<T> {
   try {
     return await fn()
-  } catch (error: any) {
-    if (retries > 0 && error?.code === "P2024") {
+  } catch (error) {
+    if (retries > 0 && (error as { code?: string })?.code === "P2024") {
       console.warn("DB timeout — retrying once...")
       await new Promise((r) => setTimeout(r, delayMs))
       return withRetry(fn, retries - 1, delayMs)

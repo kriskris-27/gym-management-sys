@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { MemberCreateSchema } from "@/lib/validations"
+import { Prisma, MembershipType, MemberStatus } from "@prisma/client"
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library"
 
 /**
  * GET: List all members with filtering and search
@@ -13,11 +15,11 @@ export async function GET(request: Request) {
   const status = searchParams.get("status")
 
   try {
-    const where: any = {}
+    const where: Prisma.MemberWhereInput = {}
 
     // Status filtering (allow ACTIVE/INACTIVE/DELETED)
     if (status && ["ACTIVE", "INACTIVE", "DELETED"].includes(status)) {
-      where.status = status
+      where.status = status as MemberStatus
     } else if (!status) {
       // Default: exclude DELETED members
       where.status = { not: "DELETED" }
@@ -50,9 +52,9 @@ export async function GET(request: Request) {
     })
 
     // Fetch all plan prices once
-    const planPrices = await (prisma as any).planPricing.findMany()
+    const planPrices = await prisma.planPricing.findMany()
     const priceMap = Object.fromEntries(
-      planPrices.map((p: any) => [p.membershipType, p.amount])
+      planPrices.map((p) => [p.membershipType, p.amount])
     )
 
     const memberIds = members.map((m) => m.id)
@@ -125,7 +127,7 @@ export async function POST(request: Request) {
 
     if (!validated.success) {
       return NextResponse.json({ 
-        error: (validated.error as any).issues[0].message 
+        error: validated.error.issues[0].message 
       }, { status: 400 })
     }
 
@@ -162,13 +164,13 @@ export async function POST(request: Request) {
     let lockedPrice: number = data.customPrice ?? -1
 
     if (lockedPrice < 0) {
-      const planPricing = await (prisma as any).planPricing.findUnique({
+      const planPricing = await prisma.planPricing.findUnique({
         where: { membershipType: data.membershipType }
       })
       lockedPrice = planPricing?.amount ?? 0
     }
 
-    const member = await (prisma as any).member.create({
+    const member = await prisma.member.create({
       data: {
         ...data,
         customPrice: lockedPrice,
@@ -200,7 +202,7 @@ export async function POST(request: Request) {
 
     // Handle specific Prisma duplicate constraint
     // Using property check instead of instanceof for better reliability with pnpm symlinks
-    if ((error as any).code === "P2002") {
+    if (error instanceof PrismaClientKnownRequestError && error.code === "P2002") {
       return NextResponse.json(
         { error: "Member with this phone already exists" },
         { status: 409 }
