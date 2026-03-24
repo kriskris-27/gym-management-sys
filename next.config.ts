@@ -2,12 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      config.externals = ['@prisma/client'];
-    }
-    return config;
-  },
+  experimental: {
+    serverComponentsExternalPackages: ['@prisma/client']
+  }
 };
 
 module.exports = {
