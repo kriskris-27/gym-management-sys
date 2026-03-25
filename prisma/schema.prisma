@@ -3,100 +3,46 @@ generator client {
   previewFeatures = ["driverAdapters"]
 }
 
-
-
-
-
-
-
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
-model Owner {
+model User {
   id        String   @id @default(cuid())
-  username  String   @unique
+  email     String   @unique
   password  String
+  role      Role     @default(STAFF)
   createdAt DateTime @default(now())
 }
 
-model PlanPricing {
-  id             String         @id @default(cuid())
-  membershipType MembershipType @unique
-  amount         Float
-  updatedAt      DateTime       @updatedAt
+enum Role {
+  ADMIN
+  STAFF
+  KIOSK
 }
 
 model Member {
-  id             String         @id @default(cuid())
-  name           String
-  phone          String         @unique
-  membershipType MembershipType
-  startDate      DateTime
-  endDate        DateTime
-  customPrice    Float?
-  status         MemberStatus   @default(ACTIVE)
-  lastRenewalAt  DateTime?
-  createdAt      DateTime       @default(now())
+  id                String   @id @default(cuid())
+  name              String
+  phone             String
+  phoneNormalized   String   @unique
+  email             String?
 
-  attendance    Attendance[]
-  payments      Payment[]
-  notifications NotificationLog[]
-}
+  status            MemberStatus @default(ACTIVE)
 
-enum AutoCloseReason {
-  MAX_DURATION
-  PREVIOUS_DAY
-}
+  lastCheckinAt     DateTime?
 
-model Attendance {
-  id              String          @id @default(cuid())
-  memberId        String
-  member          Member          @relation(fields: [memberId], references: [id])
-  date            DateTime        @db.Date
-  checkedInAt     DateTime
-  checkedOutAt    DateTime?
-  durationMinutes Int?
-  autoClosed      Boolean         @default(false)
-  autoCloseReason AutoCloseReason?
-  createdAt       DateTime        @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  @@index([memberId, date]) // For member attendance queries
-  @@index([date]) // For today's attendance queries
-  @@index([checkedInAt]) // For finding latest records
-  @@index([checkedOutAt]) // For finding open sessions
-  @@index([autoClosed]) // For filtering auto-closed sessions
-}
+  subscriptions     Subscription[]
+  payments          Payment[]
+  sessions          AttendanceSession[]
+  notifications     NotificationLog[]
 
-
-model Payment {
-  id        String      @id @default(cuid())
-  memberId  String
-  member    Member      @relation(fields: [memberId], references: [id])
-  amount    Float
-  date      DateTime
-  mode      PaymentMode
-  notes     String?
-  createdAt DateTime    @default(now())
-}
-
-model NotificationLog {
-  id       String           @id @default(cuid())
-  memberId String
-  member   Member           @relation(fields: [memberId], references: [id])
-  type     NotificationType
-  sentAt   DateTime         @default(now())
-  status   String
-}
-
-enum MembershipType {
-  MONTHLY
-  QUARTERLY
-  HALF_YEARLY
-  ANNUAL
-  PERSONAL_TRAINING
+  @@index([status])
 }
 
 enum MemberStatus {
@@ -105,14 +51,165 @@ enum MemberStatus {
   DELETED
 }
 
-enum PaymentMode {
+model Plan {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  durationDays Int
+  price        Float
+
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id        String   @id @default(cuid())
+  memberId  String
+  planId    String
+
+  startDate DateTime
+  endDate   DateTime
+  status    SubscriptionStatus
+
+  planNameSnapshot  String
+  planPriceSnapshot Float
+
+  createdAt DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  payments Payment[]
+
+  @@index([memberId])
+  @@index([planId])
+  @@index([memberId, startDate])
+  @@index([memberId, status])
+  @@index([memberId, startDate, endDate])
+  @@index([memberId, status, endDate])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+model Payment {
+  id             String   @id @default(cuid())
+  memberId       String
+  subscriptionId String?
+
+  baseAmount     Float
+  discountAmount Float
+  finalAmount    Float
+
+  method         PaymentMethod
+  status         PaymentStatus
+
+  purpose        PaymentPurpose
+
+  createdAt      DateTime @default(now())
+
+  member        Member        @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  subscription  Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([memberId])
+  @@index([createdAt])
+  @@index([subscriptionId])
+}
+
+enum PaymentMethod {
   CASH
   UPI
   CARD
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+enum PaymentPurpose {
+  SUBSCRIPTION
+  ADJUSTMENT
+}
+
+model AttendanceSession {
+  id        String   @id @default(cuid())
+  memberId  String
+
+  checkIn   DateTime
+  checkOut  DateTime?
+
+  sessionDay DateTime @db.Date
+
+  status    SessionStatus
+  source    CheckinSource
+
+  autoClosed  Boolean @default(false)
+  closeReason AutoCloseReason?
+
+  createdAt DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Restrict)
+
+  @@unique([memberId, sessionDay])
+  @@index([memberId, checkIn])
+  @@index([sessionDay])
+  @@index([memberId, sessionDay])
+}
+
+enum SessionStatus {
+  OPEN
+  CLOSED
+  AUTO_CLOSED
+  INVALID
+}
+
+enum CheckinSource {
+  KIOSK
+  ADMIN
+}
+
+enum AutoCloseReason {
+  MAX_DURATION
+  PREVIOUS_DAY
+}
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value Json
+}
+
+model NotificationLog {
+  id       String   @id @default(cuid())
+  memberId String
+  type     NotificationType
+  status   String
+
+  sentAt   DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Restrict)
 }
 
 enum NotificationType {
   EXPIRY_5_DAY
   EXPIRY_1_DAY
   INACTIVITY
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  entityType String
+  entityId  String
+  action    String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
 }

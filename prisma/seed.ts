@@ -9,35 +9,56 @@ const prisma = new (PrismaClient as any)()
 async function main() {
   const hashedPassword = await bcrypt.hash("admin123", 10)
 
-  await prisma.owner.upsert({
-    where: { username: "admin" },
+  // Create admin user
+  await prisma.user.upsert({
+    where: { email: "admin@gym.com" },
     update: {},
     create: {
-      username: "admin",
+      email: "admin@gym.com",
       password: hashedPassword,
+      role: "ADMIN",
     },
   })
 
-  const defaultPrices = [
-    { membershipType: "MONTHLY",           amount: 1000 },
-    { membershipType: "QUARTERLY",         amount: 2500 },
-    { membershipType: "HALF_YEARLY",       amount: 4500 },
-    { membershipType: "ANNUAL",            amount: 8000 },
-    { membershipType: "PERSONAL_TRAINING", amount: 0    },
+  // Create default plans
+  const defaultPlans = [
+    { name: "Monthly", durationDays: 30, price: 1000 },
+    { name: "Quarterly", durationDays: 90, price: 2500 },
+    { name: "Half Yearly", durationDays: 180, price: 4500 },
+    { name: "Annual", durationDays: 365, price: 8000 },
+    { name: "Personal Training", durationDays: 30, price: 0 },
   ] as const
 
-  for (const price of defaultPrices) {
-    await prisma.planPricing.upsert({
-      where:  { membershipType: price.membershipType },
-      update: { amount: price.amount },
-      create: price,
+  for (const plan of defaultPlans) {
+    await prisma.plan.upsert({
+      where: { name: plan.name },
+      update: { durationDays: plan.durationDays, price: plan.price },
+      create: plan,
     })
   }
-  console.log("✅ Default plan prices seeded")
 
-  console.log("✅ Owner account created")
-  console.log("   Username: admin")
-  console.log("   Password: admin123")
+  // Create default settings
+  const defaultSettings = [
+    { key: "gym_name", value: "Royal Fitness" },
+    { key: "gym_phone", value: "+91-9876543210" },
+    { key: "gym_email", value: "info@royalfitness.com" },
+    { key: "session_duration_hours", value: 2 },
+    { key: "auto_close_sessions", value: true },
+  ] as const
+
+  for (const setting of defaultSettings) {
+    await prisma.setting.upsert({
+      where: { key: setting.key },
+      update: { value: setting.value },
+      create: setting,
+    })
+  }
+
+  console.log("✅ Database seeded successfully")
+  console.log("   Admin Email: admin@gym.com")
+  console.log("   Admin Password: admin123")
+  console.log("   Default Plans: 5 plans created")
+  console.log("   Default Settings: 5 settings created")
 }
 
 main()
