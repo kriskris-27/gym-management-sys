@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { AttendanceScanSchema } from "@/lib/validations"
-
 import { getISTDateRange, calcDuration, formatDuration } from "@/lib/utils"
-
+import { cleanupMemberSessions } from "@/lib/attendance-cleanup"
 
 const rateLimitMap = new Map<string, { count: number; start: number }>()
 
@@ -63,10 +62,13 @@ export async function POST(request: Request) {
       })
     }
 
+    // 3. PRE-CLEANUP: Clean invalid sessions for this member
+    await cleanupMemberSessions(member.id, now)
+
     const { startOfTodayIST, startOfTomorrowIST } = getISTDateRange()
     const isExpired = now > new Date(member.endDate)
 
-    // 3. FIND LATEST GLOBAL RECORD
+    // 4. FIND LATEST RECORD AFTER CLEANUP
     const latestRecord = await prisma.attendance.findFirst({
       where: { memberId: member.id },
       orderBy: { checkedInAt: "desc" },
@@ -76,28 +78,16 @@ export async function POST(request: Request) {
     const baseResult = { memberName: member.name, isExpired, autoReset: isManualMode ? true : undefined }
 
     // Is the latest record within the IST today window?
-    const isLatestToday = latestRecord && latestRecord.checkedInAt >= startOfTodayIST && latestRecord.checkedInAt < startOfTomorrowIST
+    const isLatestToday = latestRecord && latestRecord.checkedInAt >= startOfTodayIST && latestRecord.checkedOutAt < startOfTomorrowIST
 
-    // STATE MACHINE
-
-    // CASE: No records at all OR Latest was yesterday and is already closed
+    // 5. DETERMINISTIC SCAN LOGIC
     if (!latestRecord || (!isLatestToday && latestRecord.checkedOutAt)) {
-      await prisma.$transaction(async (tx: any) => {
-        const existing = await tx.attendance.findFirst({
-          where: {
-            memberId: member.id,
-            checkedInAt: { gte: startOfTodayIST },
-            checkedOutAt: null
-          }
-        })
-        if (!existing) {
-          await tx.attendance.create({
-            data: { 
-              memberId: member.id, 
-              date: startOfTodayIST, 
-              checkedInAt: now 
-            }
-          })
+      // No active session - create new one
+      await prisma.attendance.create({
+        data: { 
+          memberId: member.id, 
+          date: startOfTodayIST, 
+          checkedInAt: now 
         }
       })
       return NextResponse.json({
@@ -108,29 +98,20 @@ export async function POST(request: Request) {
       })
     }
 
-    // CASE: Open record from PREVIOUS day (Forgot to check out)
+    // Handle open session from previous day (shouldn't happen after cleanup, but safety check)
     if (!latestRecord.checkedOutAt && !isLatestToday) {
       await prisma.$transaction(async (tx: any) => {
         await tx.attendance.update({
           where: { id: latestRecord.id },
-          data: { checkedOutAt: now, autoClosed: true }
+          data: { checkedOutAt: now, autoClosed: true, autoCloseReason: 'PREVIOUS_DAY' }
         })
-        const existing = await tx.attendance.findFirst({
-          where: {
-            memberId: member.id,
-            checkedInAt: { gte: startOfTodayIST },
-            checkedOutAt: null
+        await tx.attendance.create({
+          data: { 
+            memberId: member.id, 
+            date: startOfTodayIST, 
+            checkedInAt: now 
           }
         })
-        if (!existing) {
-          await tx.attendance.create({
-            data: { 
-              memberId: member.id, 
-              date: startOfTodayIST, 
-              checkedInAt: now 
-            }
-          })
-        }
       })
       return NextResponse.json({
         ...baseResult,
@@ -140,29 +121,28 @@ export async function POST(request: Request) {
       })
     }
 
-    // CASE: We have a record for TODAY
+    // Handle today's session
     if (isLatestToday) {
       if (latestRecord.checkedOutAt) {
-        const out = latestRecord.checkedOutAt
-        const dur =
-          latestRecord.durationMinutes ??
-          calcDuration(latestRecord.checkedInAt, out)
+        // Already completed today
+        const dur = latestRecord.durationMinutes ?? calcDuration(latestRecord.checkedInAt, latestRecord.checkedOutAt)
         return NextResponse.json({
           ...baseResult,
           status: "ALREADY_DONE",
           message: `Already completed today's session, ${member.name}!`,
           checkedInAt: latestRecord.checkedInAt.toISOString(),
-          checkedOutAt: out.toISOString(),
+          checkedOutAt: latestRecord.checkedOutAt.toISOString(),
           durationMinutes: dur,
           durationFormatted: formatDuration(dur),
         })
       }
 
-      // Open record TODAY
+      // Open session today - check duration
       const gap = calcDuration(latestRecord.checkedInAt, now)
       const MIN_SESSION_MINUTES = 5
 
       if (gap < MIN_SESSION_MINUTES) {
+        // Too soon - still checked in
         return NextResponse.json({
           ...baseResult,
           status: "CHECKED_IN",
@@ -174,50 +154,20 @@ export async function POST(request: Request) {
         })
       }
 
-      if (gap < 240) { // < 4 hours → Normal Check-out
-        await prisma.attendance.update({
-          where: { id: latestRecord.id },
-          data: { checkedOutAt: now, durationMinutes: gap },
-        })
-        return NextResponse.json({
-          ...baseResult,
-          status: "CHECKED_OUT",
-          message: `Goodbye, ${member.name}! You stayed for ${formatDuration(gap)} 💪`,
-          checkedInAt: latestRecord.checkedInAt.toISOString(),
-          checkedOutAt: now.toISOString(),
-          durationMinutes: gap,
-          durationFormatted: formatDuration(gap),
-        })
-      } else { // >= 4 hours → Auto-close + New Session
-        await prisma.$transaction(async (tx: any) => {
-          await tx.attendance.update({
-            where: { id: latestRecord.id },
-            data: { checkedOutAt: now, autoClosed: true }
-          })
-          const existing = await tx.attendance.findFirst({
-            where: {
-              memberId: member.id,
-              checkedInAt: { gte: startOfTodayIST },
-              checkedOutAt: null
-            }
-          })
-          if (!existing) {
-            await tx.attendance.create({
-              data: { 
-                memberId: member.id, 
-                date: startOfTodayIST, 
-                checkedInAt: now 
-              }
-            })
-          }
-        })
-        return NextResponse.json({
-          ...baseResult,
-          status: "CHECKED_IN",
-          message: `Welcome, ${member.name}! ✅`,
-          checkedInAt: now.toISOString(),
-        })
-      }
+      // Valid session duration - check out normally
+      await prisma.attendance.update({
+        where: { id: latestRecord.id },
+        data: { checkedOutAt: now, durationMinutes: gap },
+      })
+      return NextResponse.json({
+        ...baseResult,
+        status: "CHECKED_OUT",
+        message: `Goodbye, ${member.name}! You stayed for ${formatDuration(gap)} 💪`,
+        checkedInAt: latestRecord.checkedInAt.toISOString(),
+        checkedOutAt: now.toISOString(),
+        durationMinutes: gap,
+        durationFormatted: formatDuration(gap),
+      })
     }
 
     return NextResponse.json({ error: "Logic error" }, { status: 500 })

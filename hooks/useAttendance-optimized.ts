@@ -8,10 +8,8 @@ export function useAttendanceToday() {
       if (!res.ok) throw new Error("Failed to fetch attendance")
       return res.json()
     },
-    staleTime: 5 * 1000,           // Data considered fresh for 5s
-    refetchInterval: 8 * 1000,      // Backup polling every 8s (cost-efficient)
-    refetchIntervalInBackground: false, // Don't poll when tab is not visible
-    refetchOnWindowFocus: false,    // Don't refetch on window focus (we handle via mutation)
+    staleTime: 10 * 1000, // Reduced from 30s to 10s
+    refetchInterval: 10 * 1000, // Reduced from 30s to 10s
   })
 }
 
@@ -23,7 +21,7 @@ export function useMemberAttendance(memberId: string, page: number = 1, limit: n
       if (!res.ok) throw new Error("Failed to fetch member attendance")
       return res.json()
     },
-    staleTime: 60 * 1000,          // Member attendance changes less frequently
+    staleTime: 30 * 1000,
     enabled: !!memberId,
   })
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import prisma from "@/lib/prisma"
+import prisma from "@/lib/prisma-optimized"
 import { PaymentCreateSchema } from "@/lib/validations"
 
 /**
@@ -128,19 +128,46 @@ export async function POST(request: Request) {
         amount: data.amount,
         date: data.date,
         mode: data.mode,
-        notes: data.notes
+        notes: data.notes,
       },
       include: {
         member: { select: { name: true } }
       }
-    })    
-    // 2. No auto-renewal. Use PATCH /api/members/[id] { action: "renew" } for renewals.
+    })
+
+    // 3. Handle payment cycle properly
+    // Check if current lastRenewalAt is in the future (indicating a reset payment cycle)
+    const currentMember = await prisma.member.findUnique({
+      where: { id: data.memberId },
+      select: { lastRenewalAt: true }
+    })
+    
+    const now = new Date()
+    const paymentDate = new Date(data.date)
+    
+    // Only update lastRenewalAt if it's not set to a future date
+    // This preserves the payment cycle reset
+    if (currentMember?.lastRenewalAt && currentMember.lastRenewalAt > now) {
+      console.log(`[Payment Create] Preserving future lastRenewalAt (${currentMember.lastRenewalAt}) - payment cycle reset in effect`)
+      // Don't update lastRenewalAt - keep the future date to exclude old payments
+    } else {
+      // Normal case: update lastRenewalAt to payment date
+      await prisma.member.update({
+        where: { id: data.memberId },
+        data: {
+          lastRenewalAt: paymentDate
+        }
+      })
+      console.log(`[Payment Create] Updated lastRenewalAt to payment date: ${data.date}`)
+    }
+
+    console.log(`[Payment Create] Created payment ${payment.id} for member ${data.memberId}, updated lastRenewalAt to ${data.date}`)
 
     return NextResponse.json({
       payment: {
         id: payment.id,
         memberId: payment.memberId,
-        memberName: payment.member.name,
+        memberName: member.name, // Use the member from the initial query
         amount: payment.amount,
         date: payment.date.toISOString(),
         mode: payment.mode,

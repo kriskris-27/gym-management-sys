@@ -46,18 +46,28 @@ model Member {
   notifications NotificationLog[]
 }
 
+enum AutoCloseReason {
+  MAX_DURATION
+  PREVIOUS_DAY
+}
+
 model Attendance {
-  id              String    @id @default(cuid())
+  id              String          @id @default(cuid())
   memberId        String
-  member          Member    @relation(fields: [memberId], references: [id])
-  date            DateTime  @db.Date
+  member          Member          @relation(fields: [memberId], references: [id])
+  date            DateTime        @db.Date
   checkedInAt     DateTime
   checkedOutAt    DateTime?
   durationMinutes Int?
-  autoClosed      Boolean   @default(false)
-  createdAt       DateTime  @default(now())
+  autoClosed      Boolean         @default(false)
+  autoCloseReason AutoCloseReason?
+  createdAt       DateTime        @default(now())
 
-  @@index([memberId, date])
+  @@index([memberId, date]) // For member attendance queries
+  @@index([date]) // For today's attendance queries
+  @@index([checkedInAt]) // For finding latest records
+  @@index([checkedOutAt]) // For finding open sessions
+  @@index([autoClosed]) // For filtering auto-closed sessions
 }
 
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { MemberCreateSchema } from "@/lib/validations"
+import { attachFinancialsToMembers } from "@/lib/financial-service"
 
 /**
  * GET: List all members with filtering and search
@@ -49,61 +50,11 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" },
     })
 
-    // Fetch all plan prices once
-    const planPrices = await prisma.planPricing.findMany()
-    const priceMap = Object.fromEntries(
-      planPrices.map((p: any) => [p.membershipType, p.amount])
-    )
+    // Use centralized financial computation - SINGLE SOURCE OF TRUTH
+    // This replaces ALL manual calculations and priceMap usage
+    const enrichedMembers = await attachFinancialsToMembers(members)
 
-    const memberIds = members.map((m: any) => m.id)
-    const periodPayments =
-      memberIds.length > 0
-        ? await prisma.payment.findMany({
-            where: { memberId: { in: memberIds } },
-            select: { memberId: true, amount: true, date: true, createdAt: true },
-          })
-        : []
-
-    const enriched = members.map((m: any) => {
-      const totalPaid = periodPayments
-        .filter((p: any) => {
-          const periodStart = m.lastRenewalAt ?? m.startDate
-          
-          // Use createdAt for period start comparison (has timestamp precision)
-          const afterStart = p.createdAt >= periodStart
-          
-          // Use date for end bound (ACTIVE only)
-          const beforeEnd = m.status === "ACTIVE" 
-            ? p.date <= m.endDate 
-            : true
-            
-          return p.memberId === m.id && afterStart && beforeEnd
-        })
-        .reduce((sum: number, p: any) => sum + p.amount, 0)
-
-      const dueAmount = m.customPrice !== null && m.customPrice !== undefined
-        ? m.customPrice
-        : (priceMap[m.membershipType] ?? 0)
-      const remaining = dueAmount - totalPaid
-      const isPaidFull = remaining <= 0
-
-      return {
-        id: m.id,
-        name: m.name,
-        phone: m.phone,
-        membershipType: m.membershipType,
-        startDate: m.startDate,
-        endDate: m.endDate,
-        status: m.status,
-        createdAt: m.createdAt,
-        totalPaid,
-        dueAmount,
-        remaining,
-        isPaidFull,
-      }
-    })
-
-    return NextResponse.json({ members: enriched }, {
+    return NextResponse.json({ members: enrichedMembers }, {
       headers: {
         "Cache-Control": "s-maxage=60, stale-while-revalidate",
       },
@@ -121,15 +72,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
+    console.log("📨 API POST request body:", body)
+    console.log("💰 customPrice in API body:", body.customPrice, typeof body.customPrice)
+    
     const validated = MemberCreateSchema.safeParse(body)
-
+    console.log("✅ Schema validation result:", validated.success)
+    
     if (!validated.success) {
+      console.error("❌ Schema validation error:", validated.error)
       return NextResponse.json({ 
         error: validated.error.issues[0].message 
       }, { status: 400 })
     }
 
     const data = validated.data
+    console.log("✅ Validated data:", data)
+    console.log("💰 customPrice after validation:", data.customPrice, typeof data.customPrice)
     const startDate = new Date(data.startDate)
     let endDate: Date
 

@@ -617,18 +617,6 @@ export default function PaymentsPage() {
                 </div>
               </div>
 
-              {/* Notes */}
-              <div>
-                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Notes (Optional)</label>
-                <input
-                  type="text"
-                  value={modalNotes}
-                  onChange={(e) => setModalNotes(e.target.value)}
-                  placeholder="e.g. Month 1 payment"
-                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[13px] px-4 py-3 rounded-lg focus:border-[#D11F00] focus:outline-none transition-all placeholder:text-[#333333]"
-                />
-              </div>
-
               {/* Error */}
               {modalError && (
                 <p className="text-[#D11F00] text-[11px] font-medium">{modalError}</p>

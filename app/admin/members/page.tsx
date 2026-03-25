@@ -13,7 +13,9 @@ interface Member {
   endDate: string
   status: "ACTIVE" | "INACTIVE" | "DELETED"
   isPaidFull: boolean
-  dueAmount: number
+  totalAmount: number
+  totalPaid: number
+  remaining: number
 }
 
 export default function MembersPage() {
@@ -102,7 +104,7 @@ export default function MembersPage() {
     m => m.isPaidFull
   ).length
   const unpaidCount = filteredWithoutPayment.filter(
-    m => !m.isPaidFull && m.dueAmount > 0
+    m => !m.isPaidFull && m.remaining > 0
   ).length
 
   const filtered = filteredWithoutPayment.filter(m => {
@@ -289,7 +291,7 @@ export default function MembersPage() {
                   const daysLeft = getDaysDiff(member.endDate)
                   const isExpiringSoon = daysLeft >= 0 && daysLeft <= 7
                   const initial = member.name.charAt(0).toUpperCase()
-                  const remaining = member.dueAmount
+                  const remaining = member.remaining
 
                   // Membership status badge
                   const membershipBadge = isExpired ? (

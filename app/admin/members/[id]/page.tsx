@@ -31,7 +31,7 @@ interface AttendanceRecord {
 }
 
 interface PaymentSummary {
-  dueAmount: number
+  totalAmount: number
   totalPaid: number
   remaining: number
   isPaidFull: boolean
@@ -66,10 +66,12 @@ interface RenewalPayload {
 }
 
 const paymentSchema = z.object({
-  amount: z.number().min(1).max(99999),
+  amount: z.union([z.string(), z.number()])
+    .transform((val) => (typeof val === "string" ? parseFloat(val) : val))
+    .pipe(z.number().min(1).max(99999)),
   date: z.string().min(1),
   mode: z.enum(["CASH", "UPI", "CARD"]),
-  notes: z.string().max(500).optional()
+  notes: z.string().optional()
 })
 
 const memberSchema = z.object({
@@ -81,7 +83,12 @@ const memberSchema = z.object({
   status: z.enum(["ACTIVE", "INACTIVE", "DELETED"])
 })
 
-type PaymentFormData = z.infer<typeof paymentSchema>
+type PaymentFormData = {
+  amount: number
+  date: string
+  mode: "CASH" | "UPI" | "CARD"
+  notes?: string
+}
 type MemberFormData = z.infer<typeof memberSchema>
 
 export default function MemberProfilePage() {
@@ -93,10 +100,19 @@ export default function MemberProfilePage() {
   // React Query hooks - replace manual fetch + useState
   const { data: memberData, isLoading: memberLoading, isError: memberError } = useMember(id)
   const { data: paymentsData, isLoading: paymentsLoading } = usePayments({ memberId: id })
-  const { data: summaryData, isLoading: summaryLoading } = usePaymentSummary(id)
+  const { data: summaryData, isLoading: summaryLoading, error: summaryError } = usePaymentSummary(id)
   const [attendancePage, setAttendancePage] = useState(1)
   const ATTENDANCE_LIMIT = 10
   const { data: attendanceData, isLoading: attendanceLoading } = useMemberAttendance(id, attendancePage, ATTENDANCE_LIMIT)
+
+  // Debug payment summary hook
+  useEffect(() => {
+    console.log("🔍 Payment Summary Hook Debug:")
+    console.log("  - summaryLoading:", summaryLoading)
+    console.log("  - summaryError:", summaryError)
+    console.log("  - summaryData:", summaryData)
+    console.log("  - paymentSummary:", summaryData)
+  }, [summaryLoading, summaryError, summaryData])
 
   // Extract data from hooks
   const member = memberData?.member || memberData
@@ -105,6 +121,20 @@ export default function MemberProfilePage() {
   const attendance = attendanceData || { records: [], total: 0 }
   const loading = memberLoading || paymentsLoading || summaryLoading || attendanceLoading
   const notFound = memberError || (!memberLoading && !member)
+
+  // Debug paymentSummary changes
+  useEffect(() => {
+    console.log("👀 paymentSummary changed:", paymentSummary)
+    console.log("👀 paymentSummary.totalAmount:", paymentSummary?.totalAmount)
+    console.log("👀 paymentSummary.totalPaid:", paymentSummary?.totalPaid)
+    console.log("👀 paymentSummary.remaining:", paymentSummary?.remaining)
+  }, [paymentSummary])
+
+  // Debug hook loading states
+  useEffect(() => {
+    console.log("🔄 summaryLoading:", summaryLoading)
+    console.log("🔄 summaryData:", summaryData)
+  }, [summaryLoading, summaryData])
 
   // UI State
   const [tab, setTab] = useState<"ATTENDANCE" | "PAYMENTS">("ATTENDANCE")
@@ -156,7 +186,7 @@ export default function MemberProfilePage() {
         membershipType: member.membershipType,
         startDate: getTodayStr(),
         endDate: "",
-        customPrice: paymentSummary?.dueAmount ?? 0
+        customPrice: paymentSummary?.totalAmount ?? 0
       })
       setRenewError("")
     }
@@ -246,32 +276,101 @@ export default function MemberProfilePage() {
     defaultValues: { date: getTodayStr(), mode: "UPI" }
   })
   const watchedAmount = watchPayment("amount")
+  console.log("[Payment Form] Watched amount:", watchedAmount)
+  
+  // Calculate live running total
+  const [liveTotal, setLiveTotal] = useState<string | null>(null)
+  
+  useEffect(() => {
+    console.log("[Live Total] useEffect triggered with:", { paymentSummary, watchedAmount })
+    
+    // Early return if no payment summary
+    if (!paymentSummary) {
+      setLiveTotal("Waiting for payment data...")
+      return
+    }
+    
+    // Handle empty or invalid amount
+    const amount = Number(watchedAmount || 0)
+    console.log("[Live Total] Processed amount:", amount)
+    
+    if (!amount || amount <= 0) {
+      setLiveTotal("Enter an amount to see calculation")
+      return
+    }
+    
+    // Calculate totals
+    const totalPaid = Number(paymentSummary.totalPaid || 0)
+    const totalAmount = Number(paymentSummary.totalAmount || 0)
+    const afterPayment = totalPaid + amount
+    const afterRemaining = totalAmount - afterPayment
+    
+    console.log("[Live Total] Calculation:", { totalPaid, totalAmount, afterPayment, afterRemaining })
+    
+    // Set result based on remaining amount
+    let result = ""
+    if (afterRemaining <= 0) {
+      result = "After this: Fully paid ✓"
+    } else if (afterRemaining < 0) {
+      result = `After this: Overpaid by ₹${Math.abs(afterRemaining).toLocaleString('en-IN')}`
+    } else {
+      result = `After this: ₹${afterRemaining.toLocaleString('en-IN')} remaining`
+    }
+    
+    console.log("[Live Total] Final result:", result)
+    setLiveTotal(result)
+  }, [paymentSummary, watchedAmount])
+  console.log("[Payment Form] Form errors:", payErrors)
   const [paymentSuccess, setPaymentSuccess] = useState(false)
+  const [paymentError, setPaymentError] = useState("")
 
   const onPaymentSubmit = async (data: PaymentFormData) => {
+    console.log("[Payment Submit] Starting submission with data:", data)
+    setPaymentError("")
     try {
+      const requestBody = { ...data, memberId: id }
+      console.log("[Payment Submit] Request body:", requestBody)
+      
       const res = await fetch("/api/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...data, memberId: id })
+        body: JSON.stringify(requestBody)
       })
+      
+      console.log("[Payment Submit] Response status:", res.status)
+      console.log("[Payment Submit] Response OK:", res.ok)
+      
       if (res.ok) {
+        const responseData = await res.json()
+        console.log("[Payment Submit] Success response:", responseData)
         setPaymentSuccess(true)
-        // Invalidate all related queries - React Query will refetch automatically
-        queryClient.invalidateQueries({ queryKey: ["payments"] })
-        queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
-        queryClient.invalidateQueries({ queryKey: ["member", id] })
-        queryClient.invalidateQueries({ queryKey: ["members"] })
-        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+        
+        console.log("[Payment Submit] Invalidating queries...")
+        console.log("[Payment Submit] Current paymentSummary before invalidation:", paymentSummary)
+        
+        // Force immediate refetch instead of just invalidating
+        queryClient.refetchQueries({ queryKey: ["payments"] })
+        queryClient.refetchQueries({ queryKey: ["payments", "summary", id] })
+        queryClient.refetchQueries({ queryKey: ["member", id] })
+        queryClient.refetchQueries({ queryKey: ["members"] })
+        queryClient.refetchQueries({ queryKey: ["dashboard"] })
+        
+        console.log("[Payment Submit] Forced refetch of all queries")
         
         setTimeout(() => {
           setShowPaymentModal(false)
           setPaymentSuccess(false)
+          setPaymentError("")
           resetPayment()
-        }, 500)
+        }, 2000) // Extended to 2 seconds to show success state
+      } else {
+        const errorData = await res.json()
+        console.error("[Payment Submit] Error response:", errorData)
+        setPaymentError(errorData.error || "Failed to save payment")
       }
     } catch (e) {
-      console.error(e)
+      console.error("[Payment Submit] Exception caught:", e)
+      setPaymentError("Network error. Please try again.")
     }
   }
 
@@ -317,9 +416,16 @@ export default function MemberProfilePage() {
       })
       if (res.ok) {
         setEditSuccess(true)
-        // Invalidate member queries - React Query will refetch automatically
+        // Invalidate ALL related queries to refresh payment summary
         queryClient.invalidateQueries({ queryKey: ["member", id] })
         queryClient.invalidateQueries({ queryKey: ["members"] })
+        queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
+        queryClient.invalidateQueries({ queryKey: ["payments"] })
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+        
+        // Force refetch for immediate update
+        queryClient.refetchQueries({ queryKey: ["payments", "summary", id] })
+        
         setTimeout(() => {
           setShowEditModal(false)
           setEditSuccess(false)
@@ -576,15 +682,26 @@ export default function MemberProfilePage() {
       </div>
 
       {/* PAYMENT SUMMARY CARD */}
-      {paymentSummary ? (
+      {summaryLoading ? (
+        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-3 gap-4 z-10 relative">
+          <div className="border-r border-[#1C1C1C] pr-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
+          <div className="border-r border-[#1C1C1C] px-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
+          <div className="pl-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
+        </div>
+      ) : summaryError ? (
+        <div className="mt-4 bg-[#111111] border border-[#D11F00]/20 rounded-xl p-5 text-center">
+          <p className="text-[#D11F00] text-[14px]">Failed to load payment summary</p>
+          <p className="text-[#666666] text-[12px] mt-1">{summaryError.message}</p>
+        </div>
+      ) : paymentSummary ? (
         <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-3 gap-4 animate-fade z-10 relative">
           {/* CELL 1 */}
           <div className="border-r border-[#1C1C1C] pr-4">
             <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Due Amount</p>
-            {paymentSummary.dueAmount === 0 ? (
+            {paymentSummary.totalAmount === 0 ? (
               <p className="text-white text-[24px] font-black">Free Plan</p>
             ) : (
-              <p className="text-white text-[24px] font-black">₹{paymentSummary.dueAmount.toLocaleString('en-IN')}</p>
+              <p className="text-white text-[24px] font-black">₹{paymentSummary.totalAmount.toLocaleString('en-IN')}</p>
             )}
             <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">for {formatPlan(member.membershipType)} plan</p>
           </div>
@@ -621,10 +738,9 @@ export default function MemberProfilePage() {
           </div>
         </div>
       ) : (
-        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-3 gap-4 z-10 relative">
-          <div className="border-r border-[#1C1C1C] pr-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
-          <div className="border-r border-[#1C1C1C] px-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
-          <div className="pl-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
+        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 text-center">
+          <p className="text-[#666666] text-[14px]">No payment data available</p>
+          <p className="text-[#444444] text-[12px] mt-1">Payment summary is empty</p>
         </div>
       )}
 
@@ -799,7 +915,7 @@ export default function MemberProfilePage() {
       {/* ADD PAYMENT MODAL */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={() => setShowPaymentModal(false)} />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={() => { setShowPaymentModal(false); setPaymentError("") }} />
           <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[400px] w-full relative z-10 animate-modal flex flex-col shadow-2xl shadow-black/50">
             <h2 className="text-white text-[18px] font-black tracking-tight mb-4">Add Payment</h2>
 
@@ -807,12 +923,12 @@ export default function MemberProfilePage() {
             {paymentSummary ? (
               <div className="bg-[#0F0F0F] border border-[#1C1C1C] rounded-lg px-4 py-3 mb-6 flex justify-between items-center">
                 <span className="text-[#444444] text-[12px]">Remaining Balance</span>
-                {paymentSummary.remaining > 0 ? (
-                  <span className="text-[#D11F00] text-[16px] font-black">₹{paymentSummary.remaining.toLocaleString('en-IN')}</span>
-                ) : paymentSummary.remaining === 0 ? (
+                {Number(paymentSummary.remaining || 0) > 0 ? (
+                  <span className="text-[#D11F00] text-[16px] font-black">₹{Number(paymentSummary.remaining || 0).toLocaleString('en-IN')}</span>
+                ) : Number(paymentSummary.remaining || 0) === 0 ? (
                   <span className="text-[#10B981] text-[14px] font-bold">Fully Paid ✓</span>
                 ) : (
-                  <span className="text-[#F59E0B] text-[14px] font-bold">Overpaid by ₹{Math.abs(paymentSummary.remaining).toLocaleString('en-IN')}</span>
+                  <span className="text-[#F59E0B] text-[14px] font-bold">Overpaid by ₹{Math.abs(Number(paymentSummary.remaining || 0)).toLocaleString('en-IN')}</span>
                 )}
               </div>
             ) : (
@@ -825,7 +941,15 @@ export default function MemberProfilePage() {
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
                   <input
-                    {...regPayment("amount")}
+                    {...regPayment("amount", {
+                      valueAsNumber: true, // Ensure value is treated as a number
+                      onChange: (e) => {
+                        const value = e.target.value
+                        console.log("[Payment Form] Amount changed:", value)
+                        const numValue = value === "" ? 0 : Number(value)
+                        setPaymentValue("amount", isNaN(numValue) ? 0 : numValue, { shouldValidate: true })
+                      }
+                    })}
                     type="number"
                     placeholder="2500"
                     className={`w-full bg-[#0F0F0F] border ${payErrors.amount ? 'border-[#D11F00]' : 'border-[#242424]'} text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-bold`}
@@ -835,24 +959,25 @@ export default function MemberProfilePage() {
                 {paymentSummary && paymentSummary.remaining > 0 && (
                   <button
                     type="button"
-                    onClick={() => setPaymentValue("amount", paymentSummary.remaining)}
+                    onClick={() => setPaymentValue("amount", Number(paymentSummary.remaining || 0))}
                     className="text-[#D11F00] text-[11px] mt-1.5 underline underline-offset-2 hover:text-[#FF3A1A] transition-colors cursor-pointer"
                   >
-                    Pay remaining ₹{paymentSummary.remaining.toLocaleString('en-IN')}
+                    Pay remaining ₹{Number(paymentSummary.remaining || 0).toLocaleString('en-IN')}
                   </button>
                 )}
                 {/* Live running total */}
-                {paymentSummary && watchedAmount && Number(watchedAmount) > 0 && (() => {
-                  const afterPayment = (paymentSummary.totalPaid) + Number(watchedAmount)
-                  const afterRemaining = (paymentSummary.dueAmount) - afterPayment
-                  if (afterRemaining <= 0 && afterRemaining > -1) {
-                    return <p className="text-[#10B981] text-[11px] mt-1">After this: Fully paid ✓</p>
-                  } else if (afterRemaining < -1) {
-                    return <p className="text-[#F59E0B] text-[11px] mt-1">After this: Overpaid by ₹{Math.abs(afterRemaining).toLocaleString('en-IN')}</p>
-                  } else {
-                    return <p className="text-[#444444] text-[11px] mt-1">After this: ₹{afterRemaining.toLocaleString('en-IN')} remaining</p>
-                  }
-                })()}
+                {liveTotal ? (
+                  <p className={`text-[11px] mt-1 ${
+                    liveTotal.includes("Fully paid") ? "text-[#10B981]" : 
+                    liveTotal.includes("Overpaid") ? "text-[#F59E0B]" : 
+                    liveTotal.includes("Waiting") || liveTotal.includes("Enter") ? "text-[#666666]" :
+                    "text-[#444444]"
+                  }`}>
+                    {liveTotal}
+                  </p>
+                ) : (
+                  <p className="text-[#D11F00] text-[11px] mt-1">Debug: liveTotal is null</p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -887,10 +1012,17 @@ export default function MemberProfilePage() {
                 />
               </div>
 
+              {/* Payment Error Display */}
+              {paymentError && (
+                <div className="bg-[#D11F00]/10 border border-[#D11F00]/20 rounded-lg px-4 py-3">
+                  <p className="text-[#D11F00] text-[12px] font-medium">{paymentError}</p>
+                </div>
+              )}
+
               <div className="pt-2 flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setShowPaymentModal(false)}
+                  onClick={() => { setShowPaymentModal(false); setPaymentError("") }}
                   className="flex-1 bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] font-bold text-[12px] tracking-[0.1em] uppercase py-3 rounded-lg transition-all duration-200 cursor-pointer"
                 >
                   Cancel
@@ -898,12 +1030,26 @@ export default function MemberProfilePage() {
                 <button
                   type="submit"
                   disabled={isPaying || paymentSuccess}
-                  className={`flex-[2] text-white font-bold text-[12px] tracking-[0.1em] uppercase py-3 rounded-lg transition-all duration-200 flex items-center justify-center
+                  className={`flex-[2] text-white font-bold text-[12px] tracking-[0.1em] uppercase py-3 rounded-lg transition-all duration-200 flex items-center justify-center gap-2
                     ${paymentSuccess ? "bg-[#10B981]" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
                     ${(isPaying && !paymentSuccess) ? "opacity-70 cursor-not-allowed" : ""}
                   `}
                 >
-                  {paymentSuccess ? "Recorded ✓" : "Save Payment"}
+                  {isPaying ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      Processing...
+                    </>
+                  ) : paymentSuccess ? (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                      Recorded ✓
+                    </>
+                  ) : (
+                    "Save Payment"
+                  )}
                 </button>
               </div>
             </form>

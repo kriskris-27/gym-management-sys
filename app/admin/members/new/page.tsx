@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
+import { useCreateMember } from "@/hooks/useCreateMember"
 
 const schema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters")
@@ -35,6 +36,7 @@ type FormData = z.infer<typeof schema>
 
 export default function AddMemberPage() {
   const router = useRouter()
+  const createMemberMutation = useCreateMember()
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const [generalError, setGeneralError] = useState("")
@@ -50,13 +52,25 @@ export default function AddMemberPage() {
 
   const fetchPlanPrice = async (type: string) => {
     setPriceLoading(true)
+    console.log("🔍 fetchPlanPrice called with type:", type)
     try {
       const res = await fetch("/api/settings/pricing")
       const data = await res.json()
+      console.log("📊 Pricing API response:", data)
       const plan = data.pricing?.find((p: PricingPlan) => p.membershipType === type)
-      setValue("customPrice", plan?.amount ?? 0, { shouldValidate: false })
-    } catch {
-      setValue("customPrice", 0)
+      console.log("💰 Found plan:", plan)
+      const priceToSet = plan?.amount ?? 0
+      console.log("💵 Setting customPrice to:", priceToSet, typeof priceToSet)
+      setValue("customPrice", priceToSet, { shouldValidate: false })
+      
+      // Log the form value after setting
+      setTimeout(() => {
+        const currentValue = watch("customPrice")
+        console.log("👀 customPrice value after setValue:", currentValue, typeof currentValue)
+      }, 100)
+    } catch (error) {
+      console.error("❌ fetchPlanPrice error:", error)
+      setValue("customPrice", 0, { shouldValidate: false })
     } finally {
       setPriceLoading(false)
     }
@@ -82,6 +96,11 @@ export default function AddMemberPage() {
   const startDate = watch("startDate")
   const membershipType = watch("membershipType")
   const customPrice = watch("customPrice")
+
+  // Log customPrice changes
+  useEffect(() => {
+    console.log("👀 customPrice value changed:", customPrice, typeof customPrice)
+  }, [customPrice])
 
   // Auto-fetch plan price when membershipType changes
   useEffect(() => {
@@ -113,29 +132,41 @@ export default function AddMemberPage() {
   }, [startDate, membershipType, setValue])
 
   const onSubmit = async (data: FormData) => {
+    console.log("🚀 onSubmit called with form data:", data)
+    console.log("📋 customPrice value:", data.customPrice, typeof data.customPrice)
+    
     setLoading(true)
     setGeneralError("")
+    
     try {
-      const res = await fetch("/api/members", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
-      })
-      
-      const json = await res.json()
-      
-      if (res.ok) {
-        setSuccess(true)
-        setTimeout(() => {
-          router.push(`/admin/members/${json.member.id}`)
-        }, 1000)
-      } else if (res.status === 409) {
-        setError("phone", { message: "A member with this phone already exists" })
-      } else {
-        setGeneralError(json.error || "Something went wrong. Try again.")
+      // Transform data to match API expectations
+      const transformedData = {
+        ...data,
+        startDate: new Date(data.startDate),
+        endDate: data.endDate ? new Date(data.endDate) : undefined,
+        status: "ACTIVE" as const
+        // customPrice is now handled by schema validation (number or string)
       }
-    } catch (e) {
-      setGeneralError("Something went wrong. Try again.")
+      
+      console.log("🔄 Transformed data for API:", transformedData)
+      console.log("💰 customPrice in transformed data:", transformedData.customPrice, typeof transformedData.customPrice)
+      
+      const result = await createMemberMutation.mutateAsync(transformedData)
+      setSuccess(true)
+      setTimeout(() => {
+        router.push(`/admin/members/${result.member.id}`) // Redirect to member detail page
+      }, 1000)
+    } catch (error) {
+      console.error("❌ onSubmit error:", error)
+      if (error instanceof Error) {
+        if (error.message.includes("phone")) {
+          setError("phone", { message: "A member with this phone already exists" })
+        } else {
+          setGeneralError(error.message || "Something went wrong. Try again.")
+        }
+      } else {
+        setGeneralError("Something went wrong. Try again.")
+      }
     } finally {
       setLoading(false)
     }
@@ -241,7 +272,15 @@ export default function AddMemberPage() {
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#555555] text-[14px] font-medium select-none">₹</span>
               <input
-                {...register("customPrice")}
+                {...register("customPrice", {
+                  valueAsNumber: true, // Ensure the value is treated as a number
+                  onChange: (e) => {
+                    const value = e.target.value
+                    // Convert to number and update form state
+                    const numValue = value === "" ? 0 : Number(value)
+                    setValue("customPrice", isNaN(numValue) ? 0 : numValue, { shouldValidate: true })
+                  }
+                })}
                 type="number"
                 min="0"
                 max="99999"

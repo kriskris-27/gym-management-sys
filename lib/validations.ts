@@ -51,11 +51,22 @@ export const MemberCreateSchema = z.object({
   endDate: z.coerce.date().optional(),
   status: MemberStatusEnum.default("ACTIVE"),
   customPrice: z.preprocess(
-    (val) => (val === "" || val === null || val === undefined) ? null : Number(val),
+    (val) => {
+      console.log("🔧 Schema preprocessing customPrice:", val, typeof val)
+      // Handle all possible input types
+      if (val === "" || val === null || val === undefined) {
+        console.log("📝 Converting empty value to null")
+        return null
+      }
+      const num = Number(val)
+      console.log("🔢 Number conversion result:", num, typeof num, isNaN(num))
+      return isNaN(num) ? null : num
+    },
     z.number().min(0, "Custom price cannot be negative").max(99999, "Custom price too high").nullable().optional()
   ),
 }).strict()
 .refine((data) => {
+  console.log("🔍 Schema refine data:", data)
   if (data.endDate && data.startDate && data.endDate <= data.startDate) return false;
   return true;
 }, {
@@ -121,7 +132,6 @@ export const PaymentCreateSchema = z.object({
     .max(99999, "Amount exceeds maximum transaction limit"),
   date: z.coerce.date()
     .refine((date) => date <= new Date(new Date().setHours(23, 59, 59)), {
-
       message: "Payment date cannot be in the future",
     }),
   mode: PaymentModeEnum,

@@ -121,8 +121,18 @@ export async function PUT(
     // Status can only be changed via DELETE and PATCH
     delete finalUpdatePayload.status
 
-    // 3. membershipType changed → auto-recalculate endDate
+    // 3. membershipType changed → auto-recalculate endDate AND reset payment cycle
     if (updateData.membershipType && updateData.membershipType !== existingMember.membershipType) {
+      console.log(`[Member Edit] Plan changing from ${existingMember.membershipType} to ${updateData.membershipType} - resetting payment cycle`)
+      
+      // Reset payment cycle for new plan - set to future time to exclude all current payments
+      const futureTime = new Date()
+      futureTime.setDate(futureTime.getDate() + 7) // 7 days from now
+      futureTime.setHours(23, 59, 59, 999) // End of day
+      finalUpdatePayload.lastRenewalAt = futureTime
+      
+      console.log(`[Member Edit] Setting lastRenewalAt to future time: ${futureTime.toISOString()}`)
+      
       if (updateData.membershipType === "PERSONAL_TRAINING") {
         if (!body.endDate) {
           return NextResponse.json(
@@ -286,6 +296,45 @@ export async function PATCH(
         )
       }
 
+      // BUSINESS RULE: Check if old dues are paid before allowing renewal
+      console.log(`[Member Renewal] Checking dues for member ${member.name}`)
+      
+      // Calculate current remaining amount
+      const periodStart = member.lastRenewalAt ?? member.startDate
+      const paymentWhere = {
+        memberId: member.id,
+        date: {
+          gte: new Date(periodStart.toISOString().split('T')[0]),
+          lte: member.endDate ? new Date(member.endDate.toISOString().split('T')[0]) : undefined
+        }
+      }
+      
+      const paymentsSum = await prisma.payment.aggregate({
+        where: paymentWhere,
+        _sum: { amount: true }
+      })
+      
+      const totalPaid = paymentsSum._sum.amount ?? 0
+      const planPrice = member.customPrice ?? (await prisma.planPricing.findUnique({
+        where: { membershipType: member.membershipType }
+      }))?.amount ?? 0
+      
+      const remaining = planPrice - totalPaid
+      
+      console.log(`[Member Renewal] Payment check: Plan=${planPrice}, Paid=${totalPaid}, Remaining=${remaining}`)
+      
+      if (remaining > 0) {
+        return NextResponse.json(
+          { 
+            error: `Cannot renew member. Outstanding balance of ₹${remaining.toLocaleString('en-IN')} must be paid first.`,
+            outstandingBalance: remaining
+          },
+          { status: 400 }
+        )
+      }
+      
+      console.log(`[Member Renewal] All dues cleared. Allowing renewal with new payment cycle.`)
+
       const daysMap: Record<string, number> = {
         MONTHLY: 30,
         QUARTERLY: 90,
@@ -329,7 +378,7 @@ export async function PATCH(
           endDate: end,
           customPrice: newPrice,
           status: "ACTIVE",  // always reactivate on renewal
-          lastRenewalAt: new Date()  // exact renewal moment (we use createdAt for precision)
+          lastRenewalAt: new Date()  // exact renewal moment - starts new payment cycle
         }
       })
 
