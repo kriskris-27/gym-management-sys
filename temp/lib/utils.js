@@ -22,7 +22,7 @@ function getISTDateRange() {
  * Calculate distance between two dates in minutes
  */
 function calcDuration(start, end) {
-    return Math.floor((end.getTime() - start.getTime()) / 60000);
+    return (end.getTime() - start.getTime()) / 60000; // Return decimal minutes, not floored
 }
 /**
  * Format minutes into "1hr 23min" or "45min"

@@ -18,7 +18,7 @@ export function getISTDateRange() {
  * Calculate distance between two dates in minutes
  */
 export function calcDuration(start: Date, end: Date): number {
-  return Math.floor((end.getTime() - start.getTime()) / 60000)
+  return (end.getTime() - start.getTime()) / 60000 // Return decimal minutes, not floored
 }
 
 /**

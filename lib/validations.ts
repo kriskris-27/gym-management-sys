@@ -4,7 +4,7 @@ import { z } from "zod";
  * Common Security Regex
  */
 const PHONE_REGEX = /^[6-9]\d{9}$/;
-const NO_HTML_REGEX = /^[^<>]*$/; // Blocks < and > to prevent HTML/Script injection
+const NO_HTML_REGEX = /^[^<>'"%;()&]*$/; // Blocks HTML tags, SQL injection chars, and script injection
 
 /**
  * Authentication
@@ -36,7 +36,7 @@ export const PaymentModeEnum = z.enum(["CASH", "UPI", "CARD"]);
 export const MemberStatusEnum = z.enum(["ACTIVE", "INACTIVE", "DELETED"]);
 
 /**
- * Member Creation
+ * Member Creation (Updated for new schema)
  */
 export const MemberCreateSchema = z.object({
   name: z.string()
@@ -46,27 +46,24 @@ export const MemberCreateSchema = z.object({
     .regex(NO_HTML_REGEX, "Name contains invalid characters"),
   phone: z.string()
     .regex(PHONE_REGEX, "Invalid Indian mobile number (Must be 10 digits starting with 6-9)"),
-  membershipType: MembershipTypeEnum,
-  startDate: z.coerce.date(),
-  endDate: z.coerce.date().optional(),
   status: MemberStatusEnum.default("ACTIVE"),
+  // Optional fields for future subscription creation
+  membershipType: MembershipTypeEnum.optional(),
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
   customPrice: z.preprocess(
     (val) => {
-      console.log("🔧 Schema preprocessing customPrice:", val, typeof val)
       // Handle all possible input types
       if (val === "" || val === null || val === undefined) {
-        console.log("📝 Converting empty value to null")
         return null
       }
       const num = Number(val)
-      console.log("🔢 Number conversion result:", num, typeof num, isNaN(num))
       return isNaN(num) ? null : num
     },
     z.number().min(0, "Custom price cannot be negative").max(99999, "Custom price too high").nullable().optional()
   ),
 }).strict()
 .refine((data) => {
-  console.log("🔍 Schema refine data:", data)
   if (data.endDate && data.startDate && data.endDate <= data.startDate) return false;
   return true;
 }, {
@@ -78,10 +75,9 @@ export const MemberCreateSchema = z.object({
   if (data.membershipType === "PERSONAL_TRAINING" && !data.endDate) return false;
   return true;
 }, {
-  message: "Personal Training end date is explicitly required",
+  message: "Personal training requires an end date",
   path: ["endDate"],
 });
-
 
 /**
  * Member Update (Partial updates, id required)

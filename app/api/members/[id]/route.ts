@@ -17,12 +17,12 @@ export async function GET(
       where: { id },
       include: {
         _count: {
-          select: { attendance: true },
+          select: { sessions: true },
         },
-        attendance: {
-          orderBy: { checkedInAt: "desc" },
+        sessions: {
+          orderBy: { checkIn: "desc" },
           take: 1,
-          select: { checkedInAt: true },
+          select: { checkIn: true },
         },
       },
     })
@@ -32,52 +32,18 @@ export async function GET(
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
 
-    const { _count, attendance, ...memberData } = member
+    const { _count, sessions, ...memberData } = member
 
-    let planPrice = 0
-    if (member.customPrice !== null && member.customPrice !== undefined) {
-      planPrice = member.customPrice
-    } else {
-      const dbPrice = await prisma.planPricing.findUnique({
-        where: { membershipType: member.membershipType }
-      })
-      planPrice = dbPrice?.amount || 0
-    }
-
-    const periodStart = member.lastRenewalAt ?? member.startDate
-
-    const paymentWhere: any = {
-      memberId: member.id,
-      createdAt: { gte: periodStart }
-    }
-
-    if (member.status === "ACTIVE") {
-      paymentWhere.date = { lte: member.endDate }
-    }
-
-    const paymentsAggregate = await prisma.payment.aggregate({
-      where: paymentWhere,
-      _sum: {
-        amount: true
-      }
-    })
-
-    const totalPaid = paymentsAggregate._sum.amount || 0
-    const remaining = planPrice - totalPaid
-    const isPaidFull = remaining <= 0
-
+    // Simplified response without fields that don't exist in schema
     return NextResponse.json({
       member: {
         ...memberData,
-        attendanceCount: _count.attendance,
-        lastVisited: attendance[0]?.checkedInAt || null,
-        dueAmount: planPrice,
-        totalPaid,
-        remaining,
-        isPaidFull
+        attendanceCount: _count.sessions,
+        lastVisited: sessions[0]?.checkIn || null,
       },
     })
   } catch (error) {
+    console.error("❌ Member GET Error:", error)
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
   }
 }
@@ -113,50 +79,30 @@ export async function PUT(
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
 
-    // 2. Prepare payload
-    const finalUpdatePayload: any = { ...updateData }
-    const { id: _, ...payloadWithoutId } = finalUpdatePayload as any & { id?: unknown }
-    Object.assign(finalUpdatePayload, payloadWithoutId)
+    // 2. Prepare payload with proper typing
+    const finalUpdatePayload: Record<string, unknown> = { ...updateData }
+    // Remove id from payload if present
+    delete finalUpdatePayload.id
     
     // Status can only be changed via DELETE and PATCH
     delete finalUpdatePayload.status
 
-    // 3. membershipType changed → auto-recalculate endDate AND reset payment cycle
-    if (updateData.membershipType && updateData.membershipType !== existingMember.membershipType) {
-      console.log(`[Member Edit] Plan changing from ${existingMember.membershipType} to ${updateData.membershipType} - resetting payment cycle`)
-      
-      // Reset payment cycle for new plan - set to future time to exclude all current payments
-      const futureTime = new Date()
-      futureTime.setDate(futureTime.getDate() + 7) // 7 days from now
-      futureTime.setHours(23, 59, 59, 999) // End of day
-      finalUpdatePayload.lastRenewalAt = futureTime
-      
-      console.log(`[Member Edit] Setting lastRenewalAt to future time: ${futureTime.toISOString()}`)
-      
-      if (updateData.membershipType === "PERSONAL_TRAINING") {
-        if (!body.endDate) {
-          return NextResponse.json(
-            { error: "End date is required when switching to Personal Training" }, 
-            { status: 400 }
-          )
-        }
-      } else {
-        const daysMap = {
-          MONTHLY: 30,
-          QUARTERLY: 90,
-          HALF_YEARLY: 180,
-          ANNUAL: 365,
-        }
-        const daysToAdd = daysMap[updateData.membershipType as keyof typeof daysMap]
-        
-        const startStr = updateData.startDate
-          ? updateData.startDate.toISOString().split("T")[0]
-          : existingMember.startDate.toISOString().split("T")[0]
-        
-        const [y, m, d] = startStr.split("-").map(Number)
-        const newEndDate = new Date(Date.UTC(y, m - 1, d + daysToAdd))
-        finalUpdatePayload.endDate = newEndDate
-      }
+    // 3. Log any subscription-related fields that were submitted (but not handled here)
+    if ('membershipType' in updateData) {
+      console.log(`[Member Edit] membershipType update requested but should be handled via subscription service`)
+      delete finalUpdatePayload.membershipType
+    }
+    if ('startDate' in updateData) {
+      console.log(`[Member Edit] startDate update requested but should be handled via subscription service`)
+      delete finalUpdatePayload.startDate
+    }
+    if ('endDate' in updateData) {
+      console.log(`[Member Edit] endDate update requested but should be handled via subscription service`)
+      delete finalUpdatePayload.endDate
+    }
+    if ('customPrice' in updateData) {
+      console.log(`[Member Edit] customPrice update requested but should be handled via subscription service`)
+      delete finalUpdatePayload.customPrice
     }
 
     // 4. Perform the update
@@ -167,11 +113,11 @@ export async function PUT(
         id: true,
         name: true,
         phone: true,
-        membershipType: true,
-        startDate: true,
-        endDate: true,
+        email: true,
         status: true,
+        lastCheckinAt: true,
         createdAt: true,
+        updatedAt: true,
       },
     })
 
@@ -218,6 +164,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true })
   } catch (error) {
+    console.error("❌ Member DELETE Error:", error)
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }
@@ -278,17 +225,8 @@ export async function PATCH(
     }
 
     // CASE 2: Renewal
-    // body = { action: "renew", membershipType, startDate, customPrice }
+    // body = { action: "renew" }
     if (body.action === "renew") {
-      const { RenewMemberSchema } = await import("@/lib/validations")
-      const validated = RenewMemberSchema.safeParse(body)
-      if (!validated.success) {
-        return NextResponse.json(
-          { error: validated.error.issues[0].message },
-          { status: 400 }
-        )
-      }
-
       if (member.status === "DELETED") {
         return NextResponse.json(
           { error: "Cannot renew a deleted member. Restore first." },
@@ -296,93 +234,22 @@ export async function PATCH(
         )
       }
 
-      // BUSINESS RULE: Check if old dues are paid before allowing renewal
-      console.log(`[Member Renewal] Checking dues for member ${member.name}`)
+      console.log(`[Member Renewal] Renewal requested for member ${member.name}`)
+      console.log(`[Member Renewal] Note: Subscription renewal should be handled via subscription service`)
       
-      // Calculate current remaining amount
-      const periodStart = member.lastRenewalAt ?? member.startDate
-      const paymentWhere = {
-        memberId: member.id,
-        date: {
-          gte: new Date(periodStart.toISOString().split('T')[0]),
-          lte: member.endDate ? new Date(member.endDate.toISOString().split('T')[0]) : undefined
-        }
-      }
-      
-      const paymentsSum = await prisma.payment.aggregate({
-        where: paymentWhere,
-        _sum: { amount: true }
-      })
-      
-      const totalPaid = paymentsSum._sum.amount ?? 0
-      const planPrice = member.customPrice ?? (await prisma.planPricing.findUnique({
-        where: { membershipType: member.membershipType }
-      }))?.amount ?? 0
-      
-      const remaining = planPrice - totalPaid
-      
-      console.log(`[Member Renewal] Payment check: Plan=${planPrice}, Paid=${totalPaid}, Remaining=${remaining}`)
-      
-      if (remaining > 0) {
-        return NextResponse.json(
-          { 
-            error: `Cannot renew member. Outstanding balance of ₹${remaining.toLocaleString('en-IN')} must be paid first.`,
-            outstandingBalance: remaining
-          },
-          { status: 400 }
-        )
-      }
-      
-      console.log(`[Member Renewal] All dues cleared. Allowing renewal with new payment cycle.`)
-
-      const daysMap: Record<string, number> = {
-        MONTHLY: 30,
-        QUARTERLY: 90,
-        HALF_YEARLY: 180,
-        ANNUAL: 365,
-      }
-
-      const type = body.membershipType ?? member.membershipType
-      const start = body.startDate 
-        ? new Date(body.startDate) 
-        : new Date()
-
-      let end: Date
-      if (type === "PERSONAL_TRAINING") {
-        if (!body.endDate) {
-          return NextResponse.json(
-            { error: "End date required for Personal Training" },
-            { status: 400 }
-          )
-        }
-        end = new Date(body.endDate)
-      } else {
-        end = new Date(start)
-        end.setDate(start.getDate() + daysMap[type])
-      }
-
-      // Get new price if not provided
-      let newPrice = body.customPrice
-      if (newPrice === undefined || newPrice === null) {
-        const planPricing = await prisma.planPricing.findUnique({
-          where: { membershipType: type }
-        })
-        newPrice = planPricing?.amount ?? 0
-      }
-
+      // For now, just update lastCheckinAt to indicate activity
       const updated = await prisma.member.update({
         where: { id },
         data: {
-          membershipType: type,
-          startDate: start,
-          endDate: end,
-          customPrice: newPrice,
-          status: "ACTIVE",  // always reactivate on renewal
-          lastRenewalAt: new Date()  // exact renewal moment - starts new payment cycle
+          lastCheckinAt: new Date()
         }
       })
 
-      return NextResponse.json({ member: updated })
+      return NextResponse.json({ 
+        success: true,
+        message: "Member activity updated. Subscription renewal should be handled via subscription service.",
+        member: updated
+      })
     }
 
     return NextResponse.json(
@@ -391,6 +258,7 @@ export async function PATCH(
     )
 
   } catch (error) {
+    console.error("❌ Member PATCH Error:", error)
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }

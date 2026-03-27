@@ -2,20 +2,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { MemberCreateSchema } from "@/lib/validations"
 import { z } from "zod"
 
-// Types for member data
+// Types for member data - Updated for new schema
 interface Member {
   id: string
   name: string
   phone: string
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
-  startDate: string
-  endDate: string
   status: "ACTIVE" | "INACTIVE" | "DELETED"
   createdAt: string
-  totalPaid?: number
-  totalAmount?: number
-  remaining?: number
-  isPaidFull?: boolean
+  lastCheckinAt?: string
+  // Note: Removed old schema fields - these are now in subscriptions
 }
 
 interface MembersResponse {
@@ -52,20 +47,15 @@ export function useCreateMember() {
       const previousMembers = queryClient.getQueryData<MembersResponse>(["members"])
       const previousDashboard = queryClient.getQueryData(["dashboard"])
 
-      // Create optimistic member with proper ID
+      // Create optimistic member with proper ID (new schema)
       const optimisticMember: Member = {
-        id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // Better unique ID
+        id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         name: newMemberData.name,
         phone: newMemberData.phone,
-        membershipType: newMemberData.membershipType,
-        startDate: newMemberData.startDate.toISOString().split('T')[0],
-        endDate: newMemberData.endDate?.toISOString().split('T')[0] || '',
         status: "ACTIVE",
         createdAt: new Date().toISOString(),
-        totalPaid: 0,
-        totalAmount: newMemberData.customPrice || 1000, // Default price
-        remaining: newMemberData.customPrice || 1000,
-        isPaidFull: false
+        lastCheckinAt: undefined
+        // Note: Removed old schema fields - these are now in subscriptions
       }
 
       // Optimistically update the members cache

@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.scanMember = scanMember;
-exports.cleanupMemberSessionsInTransaction = cleanupMemberSessionsInTransaction;
+exports.cleanupOldSessionsInTransaction = cleanupOldSessionsInTransaction;
 exports.validateSession = validateSession;
 exports.getMemberAttendanceHistory = getMemberAttendanceHistory;
 exports.getAttendanceStats = getAttendanceStats;
@@ -9,7 +9,7 @@ exports.batchCleanupStaleSessions = batchCleanupStaleSessions;
 const prisma_optimized_1 = require("../lib/prisma-optimized");
 const utils_1 = require("../lib/utils");
 // Constants
-const MIN_SESSION_MINUTES = 5;
+const MIN_SESSION_MINUTES = 0.17; // ~10 seconds for testing (0.17 minutes)
 const MAX_DURATION_MINUTES = 4 * 60;
 const MIN_SCAN_INTERVAL_SECONDS = 5;
 const CLEANUP_LIMIT_PER_MEMBER = 1; // Only cleanup this member's sessions
@@ -38,23 +38,49 @@ async function scanMember(phone, now = new Date()) {
             };
         }
         // Step 2: Rate limit guard (domain behavioral guard)
+        // FIX: Check for potential check-out BEFORE applying rate limit
         const lastCheckinAt = member.lastCheckinAt;
+        
         if (lastCheckinAt && (now.getTime() - lastCheckinAt.getTime()) < MIN_SCAN_INTERVAL_SECONDS * 1000) {
-            // Find existing session to return
+            // Check if there's an open session that might need check-out
             const existingSession = await tx.attendanceSession.findFirst({
                 where: {
                     memberId: member.id,
-                    sessionDay: (0, utils_1.getISTDateRange)().startOfTodayIST
+                    sessionDay: (0, utils_1.getISTDateRange)().startOfTodayIST,
+                    checkOut: null // Only open sessions
                 },
                 orderBy: { checkIn: 'desc' } // Use checkIn field
             });
-            if (existingSession && !existingSession.checkOut) {
+            
+            // If there's an open session, check if it's been long enough for check-out
+            if (existingSession) {
+                const sessionDuration = (0, utils_1.calcDuration)(existingSession.checkIn, now);
+                
+                if (sessionDuration >= MIN_SESSION_MINUTES) {
+                    // Duration met - update lastCheckinAt to now for proper rate limiting
+                    await tx.member.update({
+                        where: { id: member.id },
+                        data: { lastCheckinAt: now }
+                    });
+                    // Continue to session logic (don't return here)
+                }
+                else {
+                    // Session exists but duration not met - still checked in
+                    return {
+                        state: "CHECKED_IN",
+                        memberName: member.name,
+                        message: `You're already checked in, ${member.name}! 👋`,
+                        checkInAt: existingSession.checkIn.toISOString(), // Map checkIn to checkInAt
+                        sessionId: existingSession.id
+                    };
+                }
+            }
+            else {
+                // No open session - this shouldn't happen but handle gracefully
                 return {
                     state: "CHECKED_IN",
                     memberName: member.name,
                     message: `You're already checked in, ${member.name}! 👋`,
-                    checkInAt: existingSession.checkIn.toISOString(), // Use checkIn field
-                    sessionId: existingSession.id
                 };
             }
         }
@@ -68,17 +94,7 @@ async function scanMember(phone, now = new Date()) {
             },
             orderBy: { checkIn: 'desc' } // Use checkIn field
         });
-        // Step 5: Cleanup only this member's open sessions (limit = 1)
-        await cleanupMemberSessionsInTransaction(member.id, now, tx);
-        // Step 6: Re-fetch today's session after cleanup
-        todaySession = await tx.attendanceSession.findFirst({
-            where: {
-                memberId: member.id,
-                sessionDay: startOfTodayIST
-            },
-            orderBy: { checkIn: 'desc' } // Use checkIn field
-        });
-        // Step 7: Deterministic state machine
+        // Step 5: Deterministic state machine - NO CLEANUP BEFORE LOGIC
         if (!todaySession) {
             // No session today - create new one
             try {
@@ -149,6 +165,7 @@ async function scanMember(phone, now = new Date()) {
         }
         // Open session - check duration
         const gap = (0, utils_1.calcDuration)(todaySession.checkIn, now); // Use checkIn field
+        
         if (gap < MIN_SESSION_MINUTES) {
             // Too soon - still checked in
             return {
@@ -163,14 +180,15 @@ async function scanMember(phone, now = new Date()) {
         await tx.attendanceSession.update({
             where: { id: todaySession.id },
             data: {
-                checkOut: now // Use checkOut field - duration calculated on the fly
+                checkOut: now, // Use checkOut field - duration calculated on the fly
+                status: 'CLOSED' // Use valid SessionStatus enum value
             }
         });
-        // Update member's last check-in time
-        await tx.member.update({
-            where: { id: member.id },
-            data: { lastCheckinAt: now }
-        });
+        // Note: lastCheckinAt already updated in rate limit section if bypassed
+        
+        // Cleanup OLD sessions AFTER current session is handled
+        await cleanupOldSessionsInTransaction(member.id, now, tx);
+        
         return {
             state: "CHECKED_OUT",
             memberName: member.name,
@@ -184,46 +202,34 @@ async function scanMember(phone, now = new Date()) {
     });
 }
 /**
- * Cleanup member sessions in transaction (limited scope)
- * FIX: Only this member, limited sessions, proper duration clamping
+ * Cleanup OLD sessions in transaction (only previous days, not today)
+ * FIX: Only cleanup sessions from previous days, never today's sessions
  */
-async function cleanupMemberSessionsInTransaction(memberId, now, tx) {
-    console.log(`[Attendance Domain] Cleaning up sessions for member: ${memberId}`);
+async function cleanupOldSessionsInTransaction(memberId, now, tx) {
+    console.log(`[Attendance Domain] Cleaning up OLD sessions for member: ${memberId}`);
     const { startOfTodayIST } = (0, utils_1.getISTDateRange)();
-    // Find limited open sessions for this member only
-    const openSessions = await tx.attendanceSession.findMany({
+    // Find ONLY previous day open sessions for this member
+    const oldOpenSessions = await tx.attendanceSession.findMany({
         where: {
             memberId,
-            checkOut: null // Use checkOut field
+            checkOut: null, // Use checkOut field
+            sessionDay: {
+                lt: startOfTodayIST // ONLY previous days, NOT today
+            }
         },
         take: CLEANUP_LIMIT_PER_MEMBER,
         orderBy: { checkIn: 'asc' } // Use checkIn field
     });
     const updates = [];
-    for (const session of openSessions) {
-        // Rule 1: Previous day sessions must be closed
-        if (session.sessionDay < startOfTodayIST) {
-            updates.push({
-                id: session.id,
-                checkOut: session.checkIn, // Use checkOut field
-                durationMinutes: 0,
-                autoClosed: true,
-                closeReason: 'PREVIOUS_DAY' // Use closeReason field
-            });
-            continue;
-        }
-        // Rule 2: Sessions exceeding max duration must be closed
-        const duration = (0, utils_1.calcDuration)(session.checkIn, now); // Use checkIn field
-        if (duration > MAX_DURATION_MINUTES) {
-            // FIX: Always clamp duration to max
-            updates.push({
-                id: session.id,
-                checkOut: now, // Use checkOut field
-                durationMinutes: Math.min(duration, MAX_DURATION_MINUTES),
-                autoClosed: true,
-                closeReason: 'MAX_DURATION' // Use closeReason field
-            });
-        }
+    for (const session of oldOpenSessions) {
+        // Only close previous day sessions with proper check-out time
+        updates.push({
+            id: session.id,
+            checkOut: session.checkIn, // Use checkOut field (same day is fine for old sessions)
+            durationMinutes: 0,
+            autoClosed: true,
+            closeReason: 'PREVIOUS_DAY' // Use closeReason field
+        });
     }
     // Apply updates
     if (updates.length > 0) {
@@ -236,7 +242,7 @@ async function cleanupMemberSessionsInTransaction(memberId, now, tx) {
             }
         })));
     }
-    console.log(`[Attendance Domain] Cleaned up ${updates.length} sessions for member: ${memberId}`);
+    console.log(`[Attendance Domain] Cleaned up ${updates.length} OLD sessions for member: ${memberId}`);
     return updates.length;
 }
 /**

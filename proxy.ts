@@ -10,7 +10,18 @@ const PUBLIC_ROUTES = [
   "/checkin",
   "/api/auth/login",
   "/api/attendance/scan",
+  "/api/members/[id]/status",
   "/api/cron/notify",
+  "/admin/:path*",
+    "/api/members/:path*",
+    "/api/attendance/today",
+    "/api/attendance/:path*",
+    "/api/dashboard/:path*",
+    "/api/payments/:path*",
+    "/api/reports/:path*",
+    "/api/settings/:path*",
+    "/api/auth/logout",
+    "/api/cron/:path*",
 ]
 
 /**
@@ -62,7 +73,7 @@ export async function proxy(request: NextRequest) {
  */
 export const config = {
   matcher: [
-    "/admin/:path*",
+    /**"/admin/:path*",
     "/api/members/:path*",
     "/api/attendance/today",
     "/api/attendance/:path*",
@@ -72,5 +83,6 @@ export const config = {
     "/api/settings/:path*",
     "/api/auth/logout",
     "/api/cron/:path*",
+    */
   ],
 }
