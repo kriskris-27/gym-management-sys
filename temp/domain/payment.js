@@ -189,8 +189,7 @@ async function createPayment(memberId, subscriptionId, calculation, method, purp
             finalAmount: calculation.finalAmount,
             method,
             status: 'SUCCESS',
-            purpose,
-            notes: notes || null
+            purpose
         }
     });
     console.log(`[Payment Domain] Created payment: ${payment.id}`);
@@ -279,7 +278,7 @@ async function getMemberSubscriptionFinancialSummary(memberId) {
             totalAmount: 0,
             totalPaid,
             remaining: 0,
-            isPaidFull: totalPaid === 0 // Only paid full if no payments and no amount due
+            isPaidFull: true // No outstanding amount
         };
     }
     // Get payment summary for the active subscription
