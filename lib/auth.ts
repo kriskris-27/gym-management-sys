@@ -12,7 +12,7 @@ if (!process.env.JWT_SECRET) {
 export const AUTH_COOKIE = "gym_token"
 
 export interface AuthPayload {
-  ownerId: string
+  userId: string
   username: string
 }
 

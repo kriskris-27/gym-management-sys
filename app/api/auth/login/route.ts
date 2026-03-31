@@ -45,16 +45,20 @@ export async function POST(request: Request) {
     const { username, password } = validated.data
 
     // 3. DATABASE LOOKUP
-    const owner = await prisma.owner.findUnique({
+    const user = await prisma.user.findUnique({
       where: { username },
     })
 
     // 4. TIMING ATTACK PROTECTION
     // Always run bcrypt comparison to prevent timing differences between existing/non-existing users.
-    const dummyHash = "$2b$10$abcdefghijklmnopqrstuvwxyz0123456789" // Generic valid bcrypt format
-    const isValid = await bcrypt.compare(password, owner?.password || dummyHash)
+    const DUMMY_HASH = "$2a$10$7EqJtq98hPqEX7fNZaFWoO/4c5c9e1u6KDAdAm8YGtSNYGGyRyvE2"
 
-    if (!owner || !isValid) {
+    const isValid = await bcrypt.compare(
+      password,
+      user?.password ?? DUMMY_HASH
+    )
+
+    if (!user || !isValid) {
       // Record failed attempt
       const current = rateLimitMap.get(ip) || { count: 0, lastAttempt: now }
       rateLimitMap.set(ip, { count: current.count + 1, lastAttempt: now })
@@ -64,14 +68,14 @@ export async function POST(request: Request) {
 
     // 5. SUCCESS → GENERATE JWT
     const token = await signToken({
-      ownerId: owner.id,
-      username: owner.username,
+      userId: user.id,
+      username: user.username,
     })
 
     // 6. BUILD RESPONSE + SET HTTPONLY COOKIE
     const response = NextResponse.json({ 
       success: true, 
-      username: owner.username 
+      username: user.username 
     }, { status: 200 })
 
     response.cookies.set({
@@ -79,7 +83,7 @@ export async function POST(request: Request) {
       value: token,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "lax", // Changed from "strict" to "lax" for better compatibility
       maxAge: 86400, // 24 hours in seconds
       path: "/",
     })

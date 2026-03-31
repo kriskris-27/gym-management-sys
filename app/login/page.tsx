@@ -30,7 +30,7 @@ export default function LoginPage() {
 
   // On mount → check already logged in
   useEffect(() => {
-    fetch("/api/dashboard/summary")
+    fetch("/api/dashboard/summary", { credentials: 'include' })
       .then(res => { if (res.ok) router.push("/admin/dashboard") })
       .catch(() => {})
   }, [router])
@@ -42,6 +42,7 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: 'include',
         body: JSON.stringify(data)
       })
       if (res.ok) {

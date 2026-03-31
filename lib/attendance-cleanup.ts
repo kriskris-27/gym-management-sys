@@ -1,6 +1,9 @@
 import { prisma } from "../lib/prisma-optimized"
 import { batchCleanupStaleSessions } from "../domain/attendance"
 
+// Re-export the function for other modules
+export { batchCleanupStaleSessions }
+
 /**
  * Auto-close invalid sessions for a specific member
  * Used during scan operations to ensure data integrity

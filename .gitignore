@@ -40,6 +40,22 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# javascript files (compiled/transpiled)
+*.js
+!*.js.map
+!next.config.js
+!tailwind.config.js
+!postcss.config.js
+
+# html files (generated/build artifacts)
+*.html
+!src/**/*.html
+!app/**/*.html
+
+# database migrations (keep these - they should be committed)
+# prisma/migrations/ - Uncomment below if you want to ignore migrations
+# !prisma/migrations/
+
 /app/generated/prisma
 /prisma/client
 

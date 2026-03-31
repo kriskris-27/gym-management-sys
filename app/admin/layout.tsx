@@ -52,14 +52,36 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
 
   // Auth Guard: Verify still logged in
   useEffect(() => {
-    fetch("/api/dashboard/summary")
-      .then(res => {
-        if (!res.ok) router.push("/login")
-      })
-      .catch(() => router.push("/login"))
+    let mounted = true
+    
+    const checkAuth = async () => {
+      try {
+        const res = await fetch("/api/dashboard/summary", { credentials: 'include' })
+        if (!res.ok && mounted) {
+          console.log('Auth check failed, redirecting to login')
+          router.push("/login")
+        }
+      } catch (error) {
+        console.error('Auth check error:', error)
+        if (mounted) {
+          router.push("/login")
+        }
+      } finally {
+        if (mounted) {
+          setAuthChecked(true)
+        }
+      }
+    }
+    
+    checkAuth()
+    
+    return () => {
+      mounted = false
+    }
   }, [router])
 
   const handleLogout = async () => {
@@ -72,6 +94,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   const isActive = (path: string) => pathname?.startsWith(path)
+
+  // Show loading while checking authentication
+  if (!authChecked) {
+    return (
+      <div className="flex bg-[#080808] min-h-screen text-white font-sans items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#D11F00] mx-auto mb-4"></div>
+          <p>Checking authentication...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex bg-[#080808] min-h-screen text-white font-sans selection:bg-[#D11F00]/30">

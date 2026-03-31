@@ -287,11 +287,13 @@ export default function MembersPage() {
               ) : (
                 /* DATA ROWS */
                 filtered.map(member => {
-                  const isExpired = new Date(member.endDate) < now
-                  const daysLeft = getDaysDiff(member.endDate)
+                  // Get subscription info from the latest subscription
+                  const latestSubscription = member.subscriptions?.[0]
+                  const isExpired = latestSubscription ? new Date(latestSubscription.endDate) < now : false
+                  const daysLeft = latestSubscription ? getDaysDiff(latestSubscription.endDate) : 0
                   const isExpiringSoon = daysLeft >= 0 && daysLeft <= 7
                   const initial = member.name.charAt(0).toUpperCase()
-                  const remaining = member.remaining
+                  const planPrice = latestSubscription?.planPriceSnapshot || 0
 
                   // Membership status badge
                   const membershipBadge = isExpired ? (
@@ -309,13 +311,13 @@ export default function MembersPage() {
                     <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">
                       Paid
                     </span>
-                  ) : remaining === 0 ? (
+                  ) : planPrice === 0 ? (
                     <span className="inline-block bg-[#1C1C1C] text-[#555555] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#2A2A2A]">
                       Free
                     </span>
                   ) : (
                     <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">
-                      ₹{remaining.toLocaleString('en-IN')} due
+                      ₹{planPrice.toLocaleString('en-IN')} due
                     </span>
                   )
 

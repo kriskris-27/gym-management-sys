@@ -42,6 +42,15 @@ export async function GET(request: Request) {
         createdAt: true,
         lastCheckinAt: true,
         updatedAt: true,
+        subscriptions: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            endDate: true,
+            status: true,
+            planPriceSnapshot: true
+          }
+        }
       },
       orderBy: { createdAt: "desc" },
     })

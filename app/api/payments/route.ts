@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     
     // Flexible Date Ranges (supports partial windows)
     if (startDate || endDate) {
-      where.date = {}
+      where.createdAt = {}
       if (startDate) {
         const parsed = new Date(startDate)
         if (isNaN(parsed.getTime())) {
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
             { status: 400 }
           )
         }
-        where.date.gte = parsed
+        where.createdAt.gte = parsed
       }
       if (endDate) {
         const parsed = new Date(endDate)
@@ -40,13 +40,13 @@ export async function GET(request: Request) {
             { status: 400 }
           )
         }
-        where.date.lte = parsed
+        where.createdAt.lte = parsed
       }
     }
 
     // Validate and apply Payment Mode Filter
     if (mode && ["CASH", "UPI", "CARD"].includes(mode)) {
-      where.mode = mode as "CASH" | "UPI" | "CARD"
+      where.method = mode as "CASH" | "UPI" | "CARD"
     }
 
     // Pagination
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
         include: {
           member: { select: { name: true } }
         },
-        orderBy: { date: "desc" },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit
       }),
@@ -72,9 +72,9 @@ export async function GET(request: Request) {
       id: p.id,
       memberId: p.memberId,
       memberName: p.member.name,
-      amount: p.amount,
-      date: p.date.toISOString(), // Raw full UTC format
-      mode: p.mode,
+      finalAmount: p.finalAmount,
+      createdAt: p.createdAt.toISOString(),
+      method: p.method,
       notes: p.notes
     }))
 
@@ -125,9 +125,9 @@ export async function POST(request: Request) {
     const payment = await prisma.payment.create({
       data: {
         memberId: data.memberId,
-        amount: data.amount,
-        date: data.date,
-        mode: data.mode,
+        finalAmount: data.finalAmount,
+        createdAt: data.createdAt,
+        method: data.method,
         notes: data.notes,
       },
       include: {
@@ -135,42 +135,16 @@ export async function POST(request: Request) {
       }
     })
 
-    // 3. Handle payment cycle properly
-    // Check if current lastRenewalAt is in the future (indicating a reset payment cycle)
-    const currentMember = await prisma.member.findUnique({
-      where: { id: data.memberId },
-      select: { lastRenewalAt: true }
-    })
-    
-    const now = new Date()
-    const paymentDate = new Date(data.date)
-    
-    // Only update lastRenewalAt if it's not set to a future date
-    // This preserves the payment cycle reset
-    if (currentMember?.lastRenewalAt && currentMember.lastRenewalAt > now) {
-      console.log(`[Payment Create] Preserving future lastRenewalAt (${currentMember.lastRenewalAt}) - payment cycle reset in effect`)
-      // Don't update lastRenewalAt - keep the future date to exclude old payments
-    } else {
-      // Normal case: update lastRenewalAt to payment date
-      await prisma.member.update({
-        where: { id: data.memberId },
-        data: {
-          lastRenewalAt: paymentDate
-        }
-      })
-      console.log(`[Payment Create] Updated lastRenewalAt to payment date: ${data.date}`)
-    }
-
-    console.log(`[Payment Create] Created payment ${payment.id} for member ${data.memberId}, updated lastRenewalAt to ${data.date}`)
+    console.log(`[Payment Create] Created payment ${payment.id} for member ${data.memberId}`)
 
     return NextResponse.json({
       payment: {
         id: payment.id,
         memberId: payment.memberId,
-        memberName: member.name, // Use the member from the initial query
-        amount: payment.amount,
-        date: payment.date.toISOString(),
-        mode: payment.mode,
+        memberName: member.name,
+        finalAmount: payment.finalAmount,
+        createdAt: payment.createdAt.toISOString(),
+        method: payment.method,
         notes: payment.notes
       }
     }, { status: 201 })

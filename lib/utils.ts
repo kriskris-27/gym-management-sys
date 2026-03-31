@@ -1,36 +1,156 @@
 /**
- * Precise IST Date Windowing
+ * TIME AUTHORITY: Single UTC Source with IST Display Conversion
+ * All backend logic uses UTC, all display uses converted timezone
  */
-export function getISTDateRange() {
-  const now = new Date()
-  const istOffset = 5.5 * 60 * 60 * 1000
-  const istNow = new Date(now.getTime() + istOffset)
-  const istDateStr = istNow.toISOString().split("T")[0] // e.g. "2026-03-21"
+
+import { DateTime } from "luxon"
+
+// ========================================
+// LUXON TIME AUTHORITY - SINGLE SOURCE OF TRUTH
+// ========================================
+
+/**
+ * Get UTC date range for backend operations
+ * Returns today and tomorrow in UTC
+ */
+export function getUTCDateRange() {
+  const todayUTC = DateTime.utc().startOf('day')
+  const tomorrowUTC = todayUTC.plus({ days: 1 })
   
-  // IST midnight = UTC 18:30 of previous day
-  const startOfTodayIST = new Date(istDateStr + "T00:00:00+05:30")
-  const startOfTomorrowIST = new Date(startOfTodayIST.getTime() + 24 * 60 * 60 * 1000)
-  
-  return { startOfTodayIST, startOfTomorrowIST, istDateStr }
+  return {
+    todayUTC,
+    tomorrowUTC,
+  }
 }
 
 /**
- * Calculate distance between two dates in minutes
+ * Convert UTC DateTime to display timezone (IST by default)
  */
-export function calcDuration(start: Date, end: Date): number {
-  return (end.getTime() - start.getTime()) / 60000 // Return decimal minutes, not floored
+export function toDisplayTimezone(utcDateTime: DateTime, timezone: string = "Asia/Kolkata") {
+  return utcDateTime.setZone(timezone)
 }
 
 /**
- * Format minutes into "1hr 23min" or "45min"
+ * Get display date string (YYYY-MM-DD format)
+ */
+export function getDisplayDateString(date: DateTime = DateTime.now(), timezone: string = "Asia/Kolkata") {
+  return date.setZone(timezone).toFormat('yyyy-MM-dd')
+}
+
+/**
+ * Get display time string (12-hour format with minutes)
+ */
+export function getDisplayTimeString(date: DateTime = DateTime.now(), timezone: string = "Asia/Kolkata") {
+  return date.setZone(timezone).toFormat('h:mm a')
+}
+
+/**
+ * Get display date and time (full datetime)
+ */
+export function getDisplayDateTime(date: DateTime = DateTime.now(), timezone: string = "Asia/Kolkata") {
+  return date.setZone(timezone).toFormat('EEEE, d MMMM yyyy \'at\' hh:mm a')
+}
+
+/**
+ * Get display time only (no date)
+ */
+export function getDisplayTimeOnly(date: DateTime = DateTime.now(), timezone: string = "Asia/Kolkata") {
+  return date.setZone(timezone).toFormat('h:mm a')
+}
+
+/**
+ * Log current India time with seconds using Luxon
+ */
+export function logIndiaTime(date: DateTime = DateTime.now()) {
+  const indiaTime = date.setZone('Asia/Kolkata').toFormat('h:mm:ss a')
+  console.log(`🕐 INDIA TIME: ${indiaTime}`)
+  return indiaTime
+}
+
+/**
+ * Create DateTime from ISO string (UTC)
+ */
+export function fromISO(isoString: string) {
+  return DateTime.fromISO(isoString, { zone: 'utc' })
+}
+
+/**
+ * Create DateTime from JavaScript Date
+ */
+export function fromDate(date: Date) {
+  return DateTime.fromJSDate(date, { zone: 'utc' })
+}
+
+/**
+ * Get current UTC DateTime
+ */
+export function nowUTC() {
+  return DateTime.utc()
+}
+
+/**
+ * Convert to ISO string for API responses
+ */
+export function toISOString(date: DateTime) {
+  return date.toUTC().toISO()
+}
+
+// ========================================
+// DURATION CALCULATIONS
+// ========================================
+
+/**
+ * Calculate duration between two DateTimes in minutes
+ */
+export function calcDuration(startTime: DateTime, endTime: DateTime): number {
+  return endTime.diff(startTime, 'minutes').minutes
+}
+
+/**
+ * Format duration from minutes to human readable format
  */
 export function formatDuration(minutes: number): string {
-  if (minutes < 0) return "0min"
-  const hrs = Math.floor(minutes / 60)
-  const mins = minutes % 60
-  if (hrs === 0) return `${mins}min`
-  if (mins === 0) return `${hrs}hr`
-  return `${hrs}hr ${mins}min`
+  if (minutes < 60) return `${Math.round(minutes)}m`
+  
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = Math.round(minutes % 60)
+  return `${hours}h ${remainingMinutes}m`
+}
+
+// ========================================
+// PLAN DURATION CALCULATIONS
+// ========================================
+
+/**
+ * Get plan duration in months
+ */
+export function getPlanDurationMonths(membershipType: string): number {
+  switch (membershipType) {
+    case "MONTHLY": return 1
+    case "QUARTERLY": return 3
+    case "HALF_YEARLY": return 6
+    case "ANNUAL": return 12
+    case "PERSONAL_TRAINING": return 1
+    default: return 1
+  }
+}
+
+// ========================================
+// LEGACY FUNCTIONS (deprecated)
+// ========================================
+
+/**
+ * Legacy IST Date Range (deprecated - use getUTCDateRange instead)
+ * @deprecated Use getUTCDateRange for backend logic, toDisplayTimezone for UI
+ */
+export function getISTDateRange() {
+  console.warn("getISTDateRange is deprecated. Use getUTCDateRange for backend logic.")
+  const { todayUTC, tomorrowUTC } = getUTCDateRange()
+  return { 
+    startOfTodayIST: todayUTC, 
+    startOfTomorrowIST: tomorrowUTC, 
+    istDateStr: toDisplayTimezone(todayUTC).toFormat('yyyy-MM-dd') 
+  }
 }
 
 /**
@@ -50,19 +170,5 @@ export async function withRetry<T>(
       return withRetry(fn, retries - 1, delayMs)
     }
     throw error
-  }
-}
-
-/**
- * Get plan duration in months for renewal calculations
- */
-export function getPlanDurationMonths(membershipType: string): number {
-  switch (membershipType) {
-    case "MONTHLY": return 1
-    case "QUARTERLY": return 3
-    case "HALF_YEARLY": return 6
-    case "ANNUAL": return 12
-    case "PERSONAL_TRAINING": return 1
-    default: return 1
   }
 }

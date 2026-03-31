@@ -123,14 +123,14 @@ export const AttendanceScanSchema = z.object({
  */
 export const PaymentCreateSchema = z.object({
   memberId: z.string().min(1, "Member ID is required"),
-  amount: z.number()
+  finalAmount: z.number()
     .positive("Amount must be a positive number")
     .max(99999, "Amount exceeds maximum transaction limit"),
-  date: z.coerce.date()
+  createdAt: z.coerce.date()
     .refine((date) => date <= new Date(new Date().setHours(23, 59, 59)), {
       message: "Payment date cannot be in the future",
     }),
-  mode: PaymentModeEnum,
+  method: PaymentModeEnum,
   notes: z.string()
     .trim()
     .max(500, "Notes cannot exceed 500 characters")

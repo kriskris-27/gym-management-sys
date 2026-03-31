@@ -1,6 +1,8 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { useDashboard } from "@/hooks/useDashboard"
+import { getDisplayDateTime, logIndiaTime, fromISO, nowUTC } from "@/lib/utils"
 
 interface Member {
   id: string
@@ -46,37 +48,38 @@ export default function DashboardPage() {
   const data = rawData as DashboardData | undefined
   const fetchData = () => { refetch() }
 
+  // Debug: Log current India time immediately with Luxon
+  const currentIndiaTime = nowUTC().setZone('Asia/Kolkata').toFormat('h:mm:ss a')
+  console.log(`🕐 CURRENT INDIA TIME: ${currentIndiaTime}`)
 
-  // Format date natively
-  const formattedDate = new Intl.DateTimeFormat('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
-  }).format(new Date())
+  // Format date using centralized Luxon utilities (single source of truth)
+  const formattedDate = (() => {
+    if (!data?.today?.date) return "Loading..."
+    
+    const serverDate = fromISO(data.today.date)
+    
+    // Log current India time (not server time)
+    logIndiaTime()  // This will use DateTime.now() by default
+    
+    return getDisplayDateTime(serverDate)
+  })()
 
-  // Helper to calculate live duration
+  // Helper to display duration (backend-calculated only)
   const getDurationString = (record: Attendance) => {
-    if (record.checkedOutAt || record.autoClosed) {
-      const mins = record.durationMinutes || 0
-      const hrs = Math.floor(mins / 60)
-      const rMins = mins % 60
-      if (hrs === 0) return `${rMins}m`
-      if (rMins === 0) return `${hrs}h`
-      return `${hrs}h ${rMins}m`
-    } else {
-      const start = new Date(record.checkedInAt).getTime()
-      const now = new Date().getTime()
-      const diffMins = Math.floor((now - start) / 60000)
-      const hrs = Math.floor(diffMins / 60)
-      const rMins = diffMins % 60
-      return hrs > 0 ? `${hrs}h ${rMins}m` : `${rMins}m`
-    }
+    if (!record.durationMinutes) return "ongoing"
+    
+    const minutes = record.durationMinutes
+    const hrs = Math.floor(minutes / 60)
+    const rMins = Math.floor(minutes % 60)
+    
+    if (hrs === 0) return `${rMins}m`
+    return `${hrs}h ${rMins}m`
   }
 
-  // Helper to parse time string
+  // Helper to parse time string (using centralized utility)
   const getTimeString = (isoString?: string | null) => {
     if (!isoString) return "-"
-    return new Date(isoString).toLocaleTimeString('en-US', {
-      hour: '2-digit', minute: '2-digit', hour12: true
-    })
+    return getDisplayTimeString(fromISO(isoString))
   }
 
   return (

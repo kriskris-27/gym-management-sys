@@ -1,51 +1,52 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
-import { getISTDateRange, calcDuration, formatDuration } from "@/lib/utils"
-import { batchCleanupStaleSessions } from "@/lib/attendance-cleanup"
+import { getUTCDateRange, calcDuration, formatDuration, nowUTC } from "@/lib/utils"
+import { batchCleanupStaleSessions } from "@/domain/attendance"
 
 /**
  * GET: Returns today's full attendance list for dashboard
  * Logic: Calculates live durations for members currently in the gym.
  * Includes serverless-friendly batched cleanup.
+ * Authentication: Handled by proxy middleware
  */
 export async function GET() {
-  const { startOfTodayIST, startOfTomorrowIST, istDateStr } = getISTDateRange()
-  const now = new Date()
+  // 1. TIME AUTHORITY - Use UTC as single source of truth
+  const { todayUTC, tomorrowUTC } = getUTCDateRange()
+  const now = nowUTC().toJSDate()
 
   try {
-    // 1. SERVERLESS-FRIENDLY CLEANUP: Clean limited batch of stale sessions
+    // 2. SERVERLESS-FRIENDLY CLEANUP: Clean limited batch of stale sessions
     const cleanedCount = await batchCleanupStaleSessions(now)
     if (cleanedCount > 0) {
       console.log(`🧹 Cleaned ${cleanedCount} stale attendance sessions`)
     }
 
-    // 2. FETCH TODAY'S ATTENDANCE
-    const records = await prisma.attendance.findMany({
+    // 3. FETCH TODAY'S ATTENDANCE
+    const records = await prisma.attendanceSession.findMany({
       where: {
-        checkedInAt: {
-          gte: startOfTodayIST,
-          lt: startOfTomorrowIST,
+        checkIn: {
+          gte: todayUTC.toJSDate(),
+          lt: tomorrowUTC.toJSDate(),
         },
       },
       select: {
         id: true,
         memberId: true,
-        checkedInAt: true,
-        checkedOutAt: true,
-        durationMinutes: true,
+        checkIn: true,
+        checkOut: true,
+        sessionDay: true,
         autoClosed: true,
-        autoCloseReason: true,
+        closeReason: true,
         member: {
           select: {
             name: true,
             phone: true,
-            endDate: true,
             status: true,
           },
         },
       },
       orderBy: {
-        checkedInAt: "asc",
+        checkIn: "asc",
       },
     })
 
@@ -57,19 +58,19 @@ export async function GET() {
     // 4. COUNT UNIQUE MEMBERS PRESENT TODAY
     const totalPresent = new Set(activeRecords.map((r: any) => r.memberId)).size
 
-    // 5. COUNT MEMBERS CURRENTLY INSIDE (no checkout, not auto-closed)
+    // 5. COUNT CURRENTLY INSIDE
     const currentlyInside = activeRecords.filter(
-      (r: any) => !r.checkedOutAt && !r.autoClosed
+      (r: any) => !r.checkOut && !r.autoClosed
     ).length
 
     // 6. FORMAT RECORDS WITH LIVE DURATIONS
     const formattedRecords = activeRecords.map((record: any) => {
-      const isOngoing = !record.checkedOutAt && !record.autoClosed
+      const isOngoing = !record.checkOut && !record.autoClosed
       
-      // Use stored duration for closed sessions, calculate live for ongoing
-      let duration: number | null = record.durationMinutes
+      // Calculate duration for ongoing sessions
+      let duration: number | null = null
       if (isOngoing) {
-        duration = calcDuration(record.checkedInAt, now)
+        duration = calcDuration(record.checkIn, now)
       }
 
       return {
@@ -77,19 +78,19 @@ export async function GET() {
         memberId: record.memberId,
         memberName: record.member.name,
         memberPhone: record.member.phone,
-        checkedInAt: record.checkedInAt.toISOString(),
-        checkedOutAt: record.checkedOutAt?.toISOString() || null,
+        checkedInAt: record.checkIn.toISOString(),
+        checkedOutAt: record.checkOut?.toISOString() || null,
         durationMinutes: duration,
         durationFormatted: isOngoing ? "ongoing" : formatDuration(duration || 0),
         autoClosed: record.autoClosed,
-        autoCloseReason: record.autoCloseReason,
-        isExpired: now > new Date(record.member.endDate),
+        closeReason: record.closeReason,
+        isExpired: false, // Remove member.endDate reference
       }
     })
 
     return NextResponse.json(
       {
-        date: istDateStr,
+        date: todayUTC.toISOString().split('T')[0], // Server date string
         totalPresent,
         currentlyInside,
         records: formattedRecords,
