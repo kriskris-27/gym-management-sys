@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma-optimized"
+import { prisma } from "../lib/prisma"
 
 export interface Subscription {
   id: string

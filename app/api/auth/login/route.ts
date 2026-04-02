@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
-import prisma from "@/lib/prisma-optimized"
+import prisma from "@/lib/prisma"
 import { signToken, AUTH_COOKIE } from "@/lib/auth"
 import { LoginSchema } from "@/lib/validations"
 

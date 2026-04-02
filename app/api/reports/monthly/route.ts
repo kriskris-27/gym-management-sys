@@ -1,5 +1,23 @@
 import { NextResponse } from "next/server"
-import prisma from "@/lib/prisma-optimized"
+import prisma from "@/lib/prisma"
+
+// Type definitions for report data
+interface PaymentWithMember {
+  amount: number
+  mode: string
+  date: Date
+  member: {
+    membershipType: string
+    createdAt: Date
+  }
+}
+
+interface AttendanceRecord {
+  id: string
+  checkedInAt: Date
+  memberId: string
+  durationMinutes: number | null
+}
 
 /**
  * GET: Monthly Analytics Report
@@ -44,11 +62,11 @@ export async function GET(request: Request) {
       prisma.payment.findMany({
         where: { date: { gte: startOfMonth, lt: startOfNextMonth } },
         include: { member: { select: { membershipType: true, createdAt: true } } }
-      }),
+      }) as Promise<PaymentWithMember[]>,
       // Traffic in range
       prisma.attendance.findMany({
         where: { checkedInAt: { gte: startOfMonth, lt: startOfNextMonth } }
-      }),
+      }) as Promise<AttendanceRecord[]>,
       // Membership Growth
       prisma.member.count({
         where: { createdAt: { gte: startOfMonth, lt: startOfNextMonth }, status: { not: 'DELETED' } }
@@ -72,10 +90,10 @@ export async function GET(request: Request) {
     }
 
     const renewalsThisMonth = payments.filter(
-      (p: any) => p.member.createdAt < startOfMonth
+      (p: PaymentWithMember) => p.member.createdAt < startOfMonth
     ).length
 
-    payments.forEach((p: any) => {
+    payments.forEach((p: PaymentWithMember) => {
       revenue.total += p.amount
       revenue.byMode[p.mode as keyof typeof revenue.byMode] += p.amount
       
@@ -93,14 +111,14 @@ export async function GET(request: Request) {
     // 4. TRAFFIC PROCESSING
     const traffic = {
       totalSessions: attendance.length,
-      uniqueHeadcount: new Set(attendance.map((a: any) => a.memberId)).size,
+      uniqueHeadcount: new Set(attendance.map((a: AttendanceRecord) => a.memberId)).size,
       accumulatedDuration: 0,
       durationCount: 0,
       dailySummary: {} as Record<string, { count: number; totalDuration: number; durationCount: number }>,
       hourHeatmap: {} as Record<number, number>
     }
 
-    attendance.forEach((a: any) => {
+    attendance.forEach((a: AttendanceRecord) => {
       const dateKey = a.checkedInAt.toISOString().split('T')[0]
       if (!traffic.dailySummary[dateKey]) {
         traffic.dailySummary[dateKey] = { count: 0, totalDuration: 0, durationCount: 0 }
@@ -137,7 +155,7 @@ export async function GET(request: Request) {
         total: revenue.total,
         byPlan: revenue.byPlan,
         byMode: revenue.byMode,
-        dailyBreakdown: Object.entries(revenue.dailySummary).map(([date, stats]: [string, any]) => ({ date, ...stats }))
+        dailyBreakdown: Object.entries(revenue.dailySummary).map(([date, stats]: [string, { amount: number; count: number }]) => ({ date, ...stats }))
       },
       members: {
         newThisMonth: newMembersCount,

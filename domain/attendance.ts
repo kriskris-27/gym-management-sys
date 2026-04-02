@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma-optimized"
+import { prisma } from "../lib/prisma"
 import { getISTDateRange, calcDuration, formatDuration } from "../lib/utils"
 
 // Type for Prisma transaction - inferred from prisma instance

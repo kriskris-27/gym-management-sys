@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma-optimized"
+import { prisma } from "../lib/prisma"
 import { batchCleanupStaleSessions } from "../domain/attendance"
 
 // Re-export the function for other modules

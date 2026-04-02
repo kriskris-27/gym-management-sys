@@ -16,6 +16,11 @@ interface Member {
   totalAmount: number
   totalPaid: number
   remaining: number
+  subscriptions?: Array<{
+    endDate: string
+    status: string
+    planPriceSnapshot?: number
+  }>
 }
 
 export default function MembersPage() {
@@ -29,7 +34,7 @@ export default function MembersPage() {
   const statusMap: Record<string, string | undefined> = {
     "All": undefined,
     "Active": "ACTIVE",
-    "Expired": "ACTIVE", // Expired members are still ACTIVE status but with endDate < now
+    "Inactive": "INACTIVE",
     "Deleted": "DELETED"
   }
   
@@ -81,17 +86,12 @@ export default function MembersPage() {
   // Use filtered list but without payment filter applied
   // so counts show how many in current view are paid/unpaid
   const filteredWithoutPayment = members.filter(m => {
-    const isExpired = new Date(m.endDate) < now
-
     const matchesSearch =
       m.name.toLowerCase().includes(search.toLowerCase()) ||
       m.phone.includes(search)
 
-    // For "Expired" filter, still need to filter frontend since API doesn't know about dates
-    const matchesStatus =
-      statusFilter === "Expired" ? isExpired && m.status === "ACTIVE" :
-      statusFilter === "Active" ? !isExpired && m.status === "ACTIVE" :
-      true // API already handles "All" and "Deleted" filters
+    // Status filtering - API handles the main filtering, frontend just ensures consistency
+    const matchesStatus = true // API already handles all status filters correctly
 
     const matchesPlan =
       planFilter === "All Plans" ? true :
@@ -177,7 +177,7 @@ export default function MembersPage() {
 
         {/* Status Filter Tabs */}
         <div className="flex bg-[#111111] border border-[#1C1C1C] rounded-lg p-1 overflow-x-auto max-w-full">
-          {["All", "Active", "Expired", "Deleted"].map(tab => (
+          {["All", "Active", "Inactive", "Deleted"].map(tab => (
             <button
               key={tab}
               onClick={() => setStatusFilter(tab)}

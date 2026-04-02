@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma-optimized"
+import { prisma } from "../lib/prisma"
 import { getActiveSubscription } from "./subscription"
 
 // Import interfaces from subscription domain

@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma-optimized"
+import { prisma } from "../lib/prisma"
 import { getMemberSubscriptionFinancialSummary } from "../domain/payment"
 import { getActiveSubscription } from "../domain/subscription"
 

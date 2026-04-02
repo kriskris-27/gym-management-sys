@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma-optimized"
+import { prisma } from "@/lib/prisma"
 import { PricingUpdateSchema } from "@/lib/validations"
 
 const ORDER: ("MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING")[] = [
