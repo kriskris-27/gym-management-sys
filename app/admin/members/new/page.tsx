@@ -12,23 +12,41 @@ const schema = z.object({
     .max(100).regex(/^[^<>]*$/, "Invalid characters"),
   phone: z.string().regex(/^[6-9]\d{9}$/, "Enter valid 10-digit Indian mobile number"),
   membershipType: z.enum([
-    "MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "PERSONAL_TRAINING"
+    "MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "OTHERS"
   ]),
   discountAmount: z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high"),
   startDate: z.string().min(1, "Start date required"),
-  endDate: z.string().optional()
+  endDate: z.string().optional(),
+  manualPlanName: z.string().optional(),
+  manualAmount: z.number().optional(),
 }).refine(data => {
-  if (data.membershipType === "PERSONAL_TRAINING") {
+  if (data.membershipType === "OTHERS") {
     return !!data.endDate && data.endDate.length > 0
   }
-  return true
+  return true;
 }, {
-  message: "End date required for Personal Training",
+  message: "End date required for Others",
   path: ["endDate"]
+}).refine(data => {
+  if (data.membershipType === "OTHERS" && !data.manualPlanName) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Plan name required for Others",
+  path: ["manualPlanName"]
+}).refine(data => {
+  if (data.membershipType === "OTHERS" && (data.manualAmount === undefined || data.manualAmount === null)) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Manual amount required for Others",
+  path: ["manualAmount"]
 })
 
 interface PricingPlan {
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   amount: number
 }
 
@@ -87,29 +105,39 @@ export default function AddMemberPage() {
       membershipType: "MONTHLY",
       discountAmount: 0,
       startDate: getTodayStr(),
-      endDate: ""
+      endDate: "",
+      manualPlanName: "",
     }
   })
 
   const startDate = watch("startDate")
   const membershipType = watch("membershipType")
   const discountAmount = watch("discountAmount")
-  const finalAmount = Math.max(0, basePrice - (discountAmount || 0))
+  const manualAmount = watch("manualAmount")
+  
+  const isOthers = membershipType === "OTHERS"
+
+  // Calculate final amount: if Others, use manualAmount as base; otherwise use basePrice (fetched from plans)
+  const currentBasePrice = isOthers ? (manualAmount || 0) : (basePrice || 0)
+  const finalAmount = Math.max(0, currentBasePrice - (discountAmount || 0))
 
   // Instant local lookup when membershipType changes
   useEffect(() => {
-    if (membershipType && plans.length > 0) {
+    if (membershipType && membershipType !== "OTHERS" && plans.length > 0) {
       const found = plans.find((p: PricingPlan) => p.membershipType === membershipType)
       const price = found?.amount || 0
       setBasePrice(price)
       // Reset discount if plan changes, to be safe
+      setValue("discountAmount", 0, { shouldValidate: true })
+    } else if (membershipType === "OTHERS") {
+      setBasePrice(0)
       setValue("discountAmount", 0, { shouldValidate: true })
     }
   }, [membershipType, plans, setValue])
 
   // Auto-calculate end date
   useEffect(() => {
-    if (membershipType !== "PERSONAL_TRAINING" && startDate) {
+    if (membershipType !== "OTHERS" && startDate) {
       const start = new Date(startDate)
       if (!isNaN(start.getTime())) {
         const durations: Record<string, number> = {
@@ -122,7 +150,7 @@ export default function AddMemberPage() {
         const end = new Date(start.getTime() + days * 24 * 60 * 60 * 1000)
         setValue("endDate", end.toISOString().split("T")[0], { shouldValidate: true })
       }
-    } else if (membershipType === "PERSONAL_TRAINING") {
+    } else if (membershipType === "OTHERS") {
       setValue("endDate", "", { shouldValidate: true })
     }
   }, [startDate, membershipType, setValue])
@@ -158,8 +186,6 @@ export default function AddMemberPage() {
       setLoading(false)
     }
   }
-
-  const isPersonalTraining = membershipType === "PERSONAL_TRAINING"
 
   return (
     <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 flex flex-col items-start overflow-x-hidden">
@@ -243,13 +269,47 @@ export default function AddMemberPage() {
                 <option value="QUARTERLY">Quarterly (90 days)</option>
                 <option value="HALF_YEARLY">Half-Yearly (180 days)</option>
                 <option value="ANNUAL">Annual (365 days)</option>
-                <option value="PERSONAL_TRAINING">Personal Training (custom dates)</option>
+                <option value="OTHERS">Others (Manual Entry)</option>
               </select>
               <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-[#555555]">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
               </div>
             </div>
           </div>
+
+          {/* OTHERS CUSTOM FIELDS: Plan Name & Manual Base Price */}
+          {isOthers && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-4 bg-[#1A1A1A]/30 border border-[#242424] rounded-lg animate-fadeUp">
+              <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-2">
+                  Custom Plan Name
+                </label>
+                <input
+                  {...register("manualPlanName")}
+                  type="text"
+                  placeholder="e.g. Boxing Coach"
+                  className={`w-full bg-[#0F0F0F] border ${errors.manualPlanName ? 'border-[#D11F00]' : 'border-[#242424]'} text-white text-[14px] rounded-lg px-4 py-2.5 placeholder:text-[#333333] focus:border-[#D11F00] focus:outline-none transition-all`}
+                />
+                {errors.manualPlanName && (
+                  <p className="text-[#D11F00] text-[11px] mt-1.5 animate-error">{errors.manualPlanName.message}</p>
+                )}
+              </div>
+              <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-2">
+                  Plan Amount (₹)
+                </label>
+                <input
+                  {...register("manualAmount", { valueAsNumber: true })}
+                  type="number"
+                  placeholder="e.g. 5000"
+                  className={`w-full bg-[#0F0F0F] border ${errors.manualAmount ? 'border-[#D11F00]' : 'border-[#242424]'} text-white text-[14px] rounded-lg px-4 py-2.5 placeholder:text-[#333333] focus:border-[#D11F00] focus:outline-none transition-all`}
+                />
+                {errors.manualAmount && (
+                  <p className="text-[#D11F00] text-[11px] mt-1.5 animate-error">{errors.manualAmount.message}</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* PRICING SECTION: Base, Discount, Final */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 p-4 bg-[#0A0A0A] border border-[#1C1C1C] rounded-lg">
@@ -259,7 +319,7 @@ export default function AddMemberPage() {
                 Base Price
               </label>
               <div className="text-[16px] font-bold text-[#666666] pt-1">
-                ₹{basePrice || 0}
+                ₹{currentBasePrice}
               </div>
             </div>
 
@@ -309,22 +369,22 @@ export default function AddMemberPage() {
 
             {/* FIELD 5: End Date */}
             <div>
-              <label className={`text-[10px] font-bold tracking-[0.15em] uppercase block mb-2 ${!isPersonalTraining ? "text-[#333333]" : "text-[#555555]"}`}>
+              <label className={`text-[10px] font-bold tracking-[0.15em] uppercase block mb-2 ${!isOthers ? "text-[#333333]" : "text-[#555555]"}`}>
                 End Date
               </label>
               <input
                 {...register("endDate")}
                 type="date"
-                disabled={!isPersonalTraining}
+                disabled={!isOthers}
                 className={`w-full bg-[#0F0F0F] border border-[#242424] text-[14px] rounded-lg px-4 py-3.5 transition-all duration-200 [color-scheme:dark]
-                  ${!isPersonalTraining ? "text-[#555555] opacity-50 cursor-not-allowed" : "text-white focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none cursor-pointer"}
+                  ${!isOthers ? "text-[#555555] opacity-50 cursor-not-allowed" : "text-white focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none cursor-pointer"}
                   ${errors.endDate ? 'border-[#D11F00]' : ''}
                 `}
               />
-              {!isPersonalTraining && (
+              {!isOthers && (
                 <p className="text-[#333333] text-[11px] mt-1.5 font-medium leading-tight">Auto-calculated</p>
               )}
-              {isPersonalTraining && errors.endDate && (
+              {isOthers && errors.endDate && (
                 <p className="text-[#D11F00] text-[11px] mt-1.5 animate-error">{errors.endDate.message}</p>
               )}
             </div>
@@ -371,6 +431,7 @@ export default function AddMemberPage() {
           </div>
         </form>
       </div>
+
     </div>
   )
 }

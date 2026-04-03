@@ -109,19 +109,28 @@ export async function POST(request: Request) {
           where: { name: data.membershipType }
         })
 
+        // 2. Determine Plan Details
         if (!plan) {
           throw new Error(`Plan error: '${data.membershipType}' not found in database. Please configure pricing first.`)
         }
 
-        // Calculate end date strictly server-side if it isn't explicitly provided
+        let resolvedPlanName = plan.name;
+        let resolvedBasePrice = plan.price;
         let resolvedEndDate = data.endDate;
+
+        if (data.membershipType === "OTHERS") {
+          resolvedPlanName = data.manualPlanName || "Others";
+          resolvedBasePrice = data.manualAmount || 0;
+        }
+
+        // Calculate end date server-side if it isn't explicitly provided
         if (!resolvedEndDate) {
           resolvedEndDate = new Date(data.startDate);
           resolvedEndDate.setDate(resolvedEndDate.getDate() + plan.durationDays);
         }
 
         const discount = data.discountAmount || 0;
-        const finalPrice = Math.max(0, plan.price - discount);
+        const finalPrice = Math.max(0, resolvedBasePrice - discount);
 
         // 1. Create Subscription
         const subscription = await tx.subscription.create({
@@ -131,7 +140,7 @@ export async function POST(request: Request) {
             startDate: data.startDate,
             endDate: resolvedEndDate,
             status: "ACTIVE",
-            planNameSnapshot: plan.name,
+            planNameSnapshot: resolvedPlanName,
             planPriceSnapshot: finalPrice,
           }
         })
@@ -141,7 +150,7 @@ export async function POST(request: Request) {
           data: {
             memberId: newMember.id,
             subscriptionId: subscription.id,
-            baseAmount: plan.price,
+            baseAmount: resolvedBasePrice,
             discountAmount: discount,
             finalAmount: finalPrice,
             method: "CASH", 
@@ -158,13 +167,15 @@ export async function POST(request: Request) {
             action: "CREATED_WITH_SUBSCRIPTION",
             after: { 
               name: newMember.name, 
-              plan: plan.name,
-              baseAmount: plan.price,
+              plan: resolvedPlanName,
+              baseAmount: resolvedBasePrice,
               discountAmount: discount,
               finalAmount: finalPrice 
             }
           }
         })
+
+
       } else {
          // Audit log for plain member
          await tx.auditLog.create({

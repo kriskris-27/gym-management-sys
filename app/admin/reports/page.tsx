@@ -94,7 +94,7 @@ const PLAN_ORDER = [
   "QUARTERLY",
   "HALF_YEARLY",
   "ANNUAL",
-  "PERSONAL_TRAINING",
+  "OTHERS",
 ] as const
 
 function formatBarTooltipLabel(dateStr: string) {
@@ -145,7 +145,7 @@ const PLAN_COLORS: Record<(typeof PLAN_ORDER)[number], string> = {
   QUARTERLY: "#F59E0B",
   HALF_YEARLY: "#10B981",
   ANNUAL: "#3B82F6",
-  PERSONAL_TRAINING: "#8B5CF6",
+  OTHERS: "#8B5CF6",
 }
 
 const PLAN_LABEL: Record<(typeof PLAN_ORDER)[number], string> = {
@@ -153,8 +153,9 @@ const PLAN_LABEL: Record<(typeof PLAN_ORDER)[number], string> = {
   QUARTERLY: "Quarterly",
   HALF_YEARLY: "Half Yearly",
   ANNUAL: "Annual",
-  PERSONAL_TRAINING: "Personal Training",
+  OTHERS: "Others",
 }
+
 
 function daysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate()

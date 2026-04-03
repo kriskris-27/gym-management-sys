@@ -80,6 +80,12 @@ export async function PUT(
     // 1. Core lookup (Ensures member exists and isn't deleted)
     const existingMember = await prisma.member.findUnique({
       where: { id },
+      include: {
+        subscriptions: {
+          orderBy: { createdAt: 'desc' },
+          take: 1
+        }
+      }
     })
 
     if (!existingMember || existingMember.status === "DELETED") {
@@ -110,24 +116,35 @@ export async function PUT(
 
       // B. Update subscription if relevant fields are provided
       if (updateData.membershipType || updateData.startDate || updateData.endDate) {
-        const latestSub = await tx.subscription.findFirst({
-          where: { memberId: id },
-          orderBy: { createdAt: 'desc' }
-        })
+        const latestSub = existingMember.subscriptions[0]
 
         if (latestSub) {
           // If membershipType changed, we might need plan details
           let planId = latestSub.planId
           let planName = latestSub.planNameSnapshot
+          let finalPrice = latestSub.planPriceSnapshot
 
           if (updateData.membershipType && updateData.membershipType !== latestSub.planNameSnapshot) {
-            const plan = await tx.plan.findUnique({
-              where: { name: updateData.membershipType }
-            })
-            if (plan) {
-              planId = plan.id
-              planName = plan.name
+            if (updateData.membershipType === "OTHERS") {
+              const othersPlan = await tx.plan.findUnique({ where: { name: "OTHERS" } })
+              if (!othersPlan) throw new Error("OTHERS plan not found in database. Configure pricing first.")
+              planId = othersPlan.id
+              planName = updateData.manualPlanName || "Others"
+              finalPrice = updateData.manualAmount || latestSub.planPriceSnapshot || 0
+            } else {
+              const plan = await tx.plan.findUnique({
+                where: { name: updateData.membershipType }
+              })
+              if (plan) {
+                planId = plan.id
+                planName = plan.name
+                finalPrice = plan.price
+              }
             }
+          } else if (updateData.membershipType === "OTHERS") {
+            // Updating existing OTHERS plan details
+            if (updateData.manualPlanName) planName = updateData.manualPlanName
+            if (updateData.manualAmount !== undefined) finalPrice = updateData.manualAmount
           }
 
           await tx.subscription.update({
@@ -135,9 +152,9 @@ export async function PUT(
             data: {
               planId,
               planNameSnapshot: planName,
+              planPriceSnapshot: finalPrice, 
               startDate: updateData.startDate,
               endDate: updateData.endDate
-              // Note: We don't change price on simple edit unless explicitly requested
             }
           })
         }
@@ -146,9 +163,14 @@ export async function PUT(
       return m
     })
 
+
     return NextResponse.json({ member: updatedMember })
 
   } catch (error) {
+    console.error("❌ Member PUT Error:", error)
+    if (error instanceof Error && error.message.includes("not found")) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     // Catch-all for duplicate phone numbers across different IDs
     if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
       return NextResponse.json(
@@ -199,7 +221,6 @@ export async function DELETE(
 
 /**
  * PATCH: Handler for renewal and restore actions
- * Logic: Supports renewing with optional membership type change, and restoring deleted members
  */
 export async function PATCH(
   request: Request,
@@ -210,83 +231,123 @@ export async function PATCH(
     const body = await request.json()
 
     const member = await prisma.member.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        subscriptions: {
+          orderBy: { createdAt: "desc" },
+          take: 1
+        }
+      }
     })
 
     if (!member) {
-      return NextResponse.json(
-        { error: "Member not found" },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
 
     // CASE 1: Restore deleted member
-    // body = { action: "restore" }
     if (body.action === "restore") {
       const { RestoreMemberSchema } = await import("@/lib/validations")
       const validated = RestoreMemberSchema.safeParse(body)
-      if (!validated.success) {
-        return NextResponse.json(
-          { error: "Invalid request" },
-          { status: 400 }
-        )
-      }
+      if (!validated.success) return NextResponse.json({ error: "Invalid request" }, { status: 400 })
 
-      if (member.status !== "DELETED") {
-        return NextResponse.json(
-          { error: "Member is not deleted" },
-          { status: 400 }
-        )
-      }
+      if (member.status !== "DELETED") return NextResponse.json({ error: "Member not is not deleted" }, { status: 400 })
 
       const restored = await prisma.member.update({
         where: { id },
-        data: {
-          status: "ACTIVE"
-        }
+        data: { status: "ACTIVE" }
       })
-
       return NextResponse.json({ member: restored })
     }
 
     // CASE 2: Renewal
-    // body = { action: "renew" }
     if (body.action === "renew") {
-      if (member.status === "DELETED") {
-        return NextResponse.json(
-          { error: "Cannot renew a deleted member. Restore first." },
-          { status: 400 }
-        )
-      }
+      const { RenewMemberSchema } = await import("@/lib/validations")
+      const validated = RenewMemberSchema.safeParse(body)
+      if (!validated.success) return NextResponse.json({ error: validated.error.issues[0].message }, { status: 400 })
 
-      console.log(`[Member Renewal] Renewal requested for member ${member.name}`)
-      console.log(`[Member Renewal] Note: Subscription renewal should be handled via subscription service`)
+      const { membershipType, startDate, endDate, customPrice, manualPlanName } = validated.data
       
-      // For now, just update lastCheckinAt to indicate activity
-      const updated = await prisma.member.update({
-        where: { id },
-        data: {
-          lastCheckinAt: new Date()
+      const res = await prisma.$transaction(async (tx) => {
+        // 1. Get Plan
+        const planName = membershipType || member.subscriptions[0]?.planNameSnapshot || "MONTHLY"
+        const plan = await tx.plan.findUnique({ where: { name: (membershipType === "OTHERS" || planName === "OTHERS") ? "OTHERS" : planName } })
+        
+        if (!plan) throw new Error(`Plan ${planName} not found. Configuration error.`)
+
+        // 2. Resolve Plan details
+        let resolvedPlanName = plan.name
+        let resolvedBasePrice = customPrice !== undefined ? customPrice : plan.price
+        let resolvedStartDate = startDate ? new Date(startDate) : new Date()
+        let resolvedEndDate = endDate ? new Date(endDate) : null
+
+        if (membershipType === "OTHERS") {
+          resolvedPlanName = manualPlanName || "Others"
+          // customPrice is used as base price for Others
         }
+
+        if (!resolvedEndDate) {
+          resolvedEndDate = new Date(resolvedStartDate)
+          resolvedEndDate.setDate(resolvedEndDate.getDate() + (plan.durationDays || 30))
+        }
+
+        // 3. Create Subscription
+        const subscription = await tx.subscription.create({
+          data: {
+            memberId: id,
+            planId: plan.id,
+            startDate: resolvedStartDate,
+            endDate: resolvedEndDate,
+            status: "ACTIVE",
+            planNameSnapshot: resolvedPlanName,
+            planPriceSnapshot: resolvedBasePrice
+          }
+        })
+
+        // 4. Create Payment (Auto-success for renewal for now)
+        await tx.payment.create({
+          data: {
+            memberId: id,
+            subscriptionId: subscription.id,
+            baseAmount: resolvedBasePrice,
+            discountAmount: 0,
+            finalAmount: resolvedBasePrice,
+            method: "CASH",
+            status: "SUCCESS",
+            purpose: "SUBSCRIPTION"
+          }
+        })
+
+        // 5. Update Member Status
+        const updatedMember = await tx.member.update({
+          where: { id },
+          data: { status: "ACTIVE" }
+        })
+
+        // 6. Audit Log
+        await tx.auditLog.create({
+          data: {
+            entityType: "MEMBER",
+            entityId: id,
+            action: "RENEWED",
+            after: { 
+              plan: resolvedPlanName,
+              startDate: resolvedStartDate,
+              endDate: resolvedEndDate,
+              amount: resolvedBasePrice
+            }
+          }
+        })
+
+        return updatedMember
       })
 
-      return NextResponse.json({ 
-        success: true,
-        message: "Member activity updated. Subscription renewal should be handled via subscription service.",
-        member: updated
-      })
+      return NextResponse.json({ success: true, member: res })
     }
 
-    return NextResponse.json(
-      { error: "Invalid action" },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 })
 
   } catch (error) {
     console.error("❌ Member PATCH Error:", error)
-    return NextResponse.json(
-      { error: "Internal Server Error" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Internal Server Error" }, { status: 500 })
   }
 }

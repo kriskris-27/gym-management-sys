@@ -38,117 +38,100 @@ export async function GET(request: Request) {
   let year = parseInt(searchParams.get("year") || istYear.toString())
   let month = parseInt(searchParams.get("month") || istMonth.toString())
 
-  // Bound year/month to sensible defaults
   if (isNaN(year) || year < 2020 || year > 2030) year = istYear
   if (isNaN(month) || month < 1 || month > 12) month = istMonth
 
-  // Start/End boundaries for IST Month
-  const startOfMonth = new Date(
-    `${year}-${String(month).padStart(2, "0")}-01T00:00:00+05:30`
-  )
+  const startOfMonth = new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00+05:30`)
   const startOfNextMonth = new Date(startOfMonth)
   startOfNextMonth.setMonth(startOfNextMonth.getMonth() + 1)
 
   try {
-    // 2. PARALLEL DB FETCHING
-    const [
-      payments,
-      attendance,
-      newMembersCount,
-      activeMembersCount,
-      expiredMembersCount
-    ] = await Promise.all([
-      // Financials in range
+    // 2. FETCH DATA
+    const [payments, sessions, newMembersCount, activeMembersCount, expiredMembersCount] = await Promise.all([
       prisma.payment.findMany({
-        where: { date: { gte: startOfMonth, lt: startOfNextMonth } },
-        include: { member: { select: { membershipType: true, createdAt: true } } }
-      }) as Promise<PaymentWithMember[]>,
-      // Traffic in range
-      prisma.attendance.findMany({
-        where: { checkedInAt: { gte: startOfMonth, lt: startOfNextMonth } }
-      }) as Promise<AttendanceRecord[]>,
-      // Membership Growth
+        where: { createdAt: { gte: startOfMonth, lt: startOfNextMonth }, status: "SUCCESS" },
+        include: { 
+          member: { select: { createdAt: true } },
+          subscription: { select: { planNameSnapshot: true, plan: { select: { name: true } } } }
+        }
+      }),
+      prisma.attendanceSession.findMany({
+        where: { checkIn: { gte: startOfMonth, lt: startOfNextMonth } }
+      }),
       prisma.member.count({
         where: { createdAt: { gte: startOfMonth, lt: startOfNextMonth }, status: { not: 'DELETED' } }
       }),
-      // Snap of Active counts
-      prisma.member.count({
-        where: { status: 'ACTIVE' }
-      }),
-      // Expiries occurring this month
-      prisma.member.count({
-        where: { endDate: { gte: startOfMonth, lt: startOfNextMonth }, status: { not: 'DELETED' } }
+      prisma.member.count({ where: { status: 'ACTIVE' } }),
+      prisma.subscription.count({
+        where: { endDate: { gte: startOfMonth, lt: startOfNextMonth }, status: 'ACTIVE' }
       })
     ])
 
     // 3. REVENUE PROCESSING
     const revenue = {
       total: 0,
-      byPlan: { MONTHLY: 0, QUARTERLY: 0, HALF_YEARLY: 0, ANNUAL: 0, PERSONAL_TRAINING: 0 },
+      byPlan: { MONTHLY: 0, QUARTERLY: 0, HALF_YEARLY: 0, ANNUAL: 0, OTHERS: 0 },
       byMode: { CASH: 0, UPI: 0, CARD: 0 },
       dailySummary: {} as Record<string, { amount: number; count: number }>
     }
 
-    const renewalsThisMonth = payments.filter(
-      (p: PaymentWithMember) => p.member.createdAt < startOfMonth
-    ).length
+    const renewalsThisMonth = payments.filter((p: any) => p.member.createdAt < startOfMonth).length
 
-    payments.forEach((p: PaymentWithMember) => {
-      revenue.total += p.amount
-      revenue.byMode[p.mode as keyof typeof revenue.byMode] += p.amount
+    payments.forEach((p: any) => {
+      const finalAmount = p.finalAmount || p.baseAmount || 0
+      revenue.total += finalAmount
+      revenue.byMode[p.method as keyof typeof revenue.byMode] += finalAmount
       
-      const plan = p.member.membershipType
-      revenue.byPlan[plan as keyof typeof revenue.byPlan] += p.amount
+      const planBaseName = p.subscription?.plan?.name || "OTHERS"
+      let category = "OTHERS"
+      if (["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"].includes(planBaseName)) {
+        category = planBaseName
+      }
+      revenue.byPlan[category as keyof typeof revenue.byPlan] += finalAmount
       
-      const dateKey = p.date.toISOString().split('T')[0]
+      const dateKey = p.createdAt.toISOString().split('T')[0]
       if (!revenue.dailySummary[dateKey]) {
         revenue.dailySummary[dateKey] = { amount: 0, count: 0 }
       }
-      revenue.dailySummary[dateKey].amount += p.amount
+      revenue.dailySummary[dateKey].amount += finalAmount
       revenue.dailySummary[dateKey].count += 1
     })
 
     // 4. TRAFFIC PROCESSING
     const traffic = {
-      totalSessions: attendance.length,
-      uniqueHeadcount: new Set(attendance.map((a: AttendanceRecord) => a.memberId)).size,
+      totalSessions: sessions.length,
+      uniqueHeadcount: new Set(sessions.map((a: any) => a.memberId)).size,
       accumulatedDuration: 0,
       durationCount: 0,
       dailySummary: {} as Record<string, { count: number; totalDuration: number; durationCount: number }>,
       hourHeatmap: {} as Record<number, number>
     }
 
-    attendance.forEach((a: AttendanceRecord) => {
-      const dateKey = a.checkedInAt.toISOString().split('T')[0]
+    sessions.forEach((a: any) => {
+      const dateKey = a.checkIn.toISOString().split('T')[0]
       if (!traffic.dailySummary[dateKey]) {
         traffic.dailySummary[dateKey] = { count: 0, totalDuration: 0, durationCount: 0 }
       }
       traffic.dailySummary[dateKey].count += 1
 
-      // Capture check-in hour in IST
-      const istHour = new Date(a.checkedInAt.getTime() + istOffset).getUTCHours()
+      const istHour = new Date(a.checkIn.getTime() + istOffset).getUTCHours()
       traffic.hourHeatmap[istHour] = (traffic.hourHeatmap[istHour] || 0) + 1
 
-      if (a.durationMinutes !== null) {
-        traffic.accumulatedDuration += a.durationMinutes
-        traffic.durationCount += 1
-        traffic.dailySummary[dateKey].totalDuration += a.durationMinutes
-        traffic.dailySummary[dateKey].durationCount += 1
+      if (a.checkIn && a.checkOut) {
+        const duration = Math.round((a.checkOut.getTime() - a.checkIn.getTime()) / (1000 * 60))
+        if (duration > 0) {
+          traffic.accumulatedDuration += duration
+          traffic.durationCount += 1
+          traffic.dailySummary[dateKey].totalDuration += duration
+          traffic.dailySummary[dateKey].durationCount += 1
+        }
       }
     })
 
-    // Identify busiest hour
     const peakHourEntry = Object.entries(traffic.hourHeatmap).sort(([, a]: [string, number], [, b]: [string, number]) => b - a)[0]
     const peakHour = peakHourEntry ? parseInt(peakHourEntry[0]) : 0
+    const reportLabel = startOfMonth.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })
 
-    // Readable Label
-    const reportLabel = startOfMonth.toLocaleString('en-US', { 
-      month: 'long', 
-      year: 'numeric', 
-      timeZone: 'Asia/Kolkata' 
-    })
-
-    // 5. FINAL ASSEMBLY
     return NextResponse.json({
       period: { year, month, label: reportLabel },
       revenue: {
@@ -176,9 +159,7 @@ export async function GET(request: Request) {
         hourHeatmap: Array.from({ length: 24 }, (_, h) => traffic.hourHeatmap[h] ?? 0)
       }
     }, {
-      headers: { 
-        "Cache-Control": "s-maxage=300, stale-while-revalidate" 
-      }
+      headers: { "Cache-Control": "s-maxage=300, stale-while-revalidate" }
     })
 
   } catch (error) {
@@ -186,3 +167,4 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
   }
 }
+

@@ -130,7 +130,7 @@ export function getPlanDurationMonths(membershipType: string): number {
     case "QUARTERLY": return 3
     case "HALF_YEARLY": return 6
     case "ANNUAL": return 12
-    case "PERSONAL_TRAINING": return 1
+    case "OTHERS": return 1
     default: return 1
   }
 }

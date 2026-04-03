@@ -2,12 +2,12 @@ import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { PricingUpdateSchema } from "@/lib/validations"
 
-const ORDER: ("MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING")[] = [
+const ORDER: ("MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS")[] = [
   "MONTHLY",
   "QUARTERLY",
   "HALF_YEARLY",
   "ANNUAL",
-  "PERSONAL_TRAINING"
+  "OTHERS"
 ]
 
 export async function GET() {
@@ -21,7 +21,7 @@ export async function GET() {
 
     const pricing = ORDER.map(type => ({
       membershipType: type,
-      amount: dbMap.has(type) ? dbMap.get(type)! : 0
+      amount: dbMap.has(type) ? dbMap.get(type)! : (type === "OTHERS" ? 0 : 0)
     }))
 
     return NextResponse.json({ pricing })
@@ -47,7 +47,7 @@ export async function PUT(request: Request) {
       "QUARTERLY": 90,
       "HALF_YEARLY": 180,
       "ANNUAL": 365,
-      "PERSONAL_TRAINING": 30 // Default for PT, can be adjusted
+      "OTHERS": 1 // Default 1 day, usually manual anyway
     }
 
     // Upsert the Plan table based on the pricing input
@@ -83,3 +83,4 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Failed to update pricing" }, { status: 500 })
   }
 }
+

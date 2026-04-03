@@ -3,7 +3,7 @@ import { useState, useEffect } from "react"
 // lucide-react removed
 
 
-type MembershipType = "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+type MembershipType = "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
 
 interface PricingItem {
   membershipType: MembershipType
@@ -15,8 +15,9 @@ const planDetails: Record<MembershipType, { name: string; duration: string }> = 
   QUARTERLY: { name: "Quarterly", duration: "90 days" },
   HALF_YEARLY: { name: "Half-Yearly", duration: "180 days" },
   ANNUAL: { name: "Annual", duration: "365 days" },
-  PERSONAL_TRAINING: { name: "Personal Training", duration: "custom" },
+  OTHERS: { name: "Others", duration: "custom" },
 }
+
 
 const Spinner = ({ className }: { className?: string }) => (
   <svg className={`animate-spin ${className || ''}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

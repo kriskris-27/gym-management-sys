@@ -14,7 +14,7 @@ interface Member {
   id: string
   name: string
   phone: string
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   startDate: string
   endDate: string
   status: "ACTIVE" | "INACTIVE" | "DELETED"
@@ -46,23 +46,25 @@ interface PaymentRecord {
 }
 
 interface PricingPlan {
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   amount: number
 }
 
 interface RenewalFormData {
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   startDate: string
   endDate?: string
   customPrice?: number
+  manualPlanName?: string
 }
 
 interface RenewalPayload {
   action: string
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   startDate: string
   endDate?: string
   customPrice?: number | undefined
+  manualPlanName?: string
 }
 
 const paymentSchema = z.object({
@@ -77,10 +79,12 @@ const paymentSchema = z.object({
 const memberSchema = z.object({
   name: z.string().min(2).max(100).regex(/^[^<>]*$/),
   phone: z.string().regex(/^[6-9]\d{9}$/),
-  membershipType: z.enum(["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "PERSONAL_TRAINING"]),
+  membershipType: z.enum(["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "OTHERS"]),
   startDate: z.string().min(1),
   endDate: z.string().optional(),
-  status: z.enum(["ACTIVE", "INACTIVE", "DELETED"])
+  status: z.enum(["ACTIVE", "INACTIVE", "DELETED"]),
+  manualPlanName: z.string().optional(),
+  manualAmount: z.number().optional(),
 })
 
 type PaymentFormData = z.input<typeof paymentSchema>
@@ -142,12 +146,6 @@ export default function MemberProfilePage() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [renewLoading, setRenewLoading] = useState(false)
   const [renewError, setRenewError] = useState("")
-  const [renewForm, setRenewForm] = useState({
-    membershipType: "",
-    startDate: "",
-    endDate: "",
-    customPrice: 0
-  })
   const [deleteLoading, setDeleteLoading] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -174,71 +172,8 @@ export default function MemberProfilePage() {
     }
   }, [dropdownOpen])
 
-  // Initialize renewal form when modal opens
-  useEffect(() => {
-    if (member && showRenewalModal) {
-      setRenewForm({
-        membershipType: member.membershipType,
-        startDate: getTodayStr(),
-        endDate: "",
-        customPrice: paymentSummary?.totalAmount ?? 0
-      })
-      setRenewError("")
-    }
-  }, [member, showRenewalModal, paymentSummary])
 
-  // Renewal handler
-  const handleRenewal = async () => {
-    setRenewLoading(true)
-    setRenewError("")
-    try {
-      const res = await fetch(`/api/members/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "renew",
-          membershipType: renewForm.membershipType,
-          startDate: renewForm.startDate,
-          endDate: renewForm.membershipType === "PERSONAL_TRAINING" ? renewForm.endDate : undefined,
-          customPrice: renewForm.customPrice
-        })
-      })
-      if (res.ok) {
-        setShowRenewalModal(false)
-        // Invalidate all related queries - React Query will refetch automatically
-        queryClient.invalidateQueries({ queryKey: ["payments"] })
-        queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
-        queryClient.invalidateQueries({ queryKey: ["member", id] })
-        queryClient.invalidateQueries({ queryKey: ["members"] })
-        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
-      } else {
-        const json = await res.json()
-        setRenewError(json.error ?? "Failed to renew membership")
-      }
-    } catch (e) {
-      setRenewError("Network error. Please try again.")
-      console.error(e)
-    } finally {
-      setRenewLoading(false)
-    }
-  }
 
-  // Fetch plan price when membership type changes
-  const fetchPlanPrice = async (type: string) => {
-    try {
-      const res = await fetch("/api/settings/pricing")
-      if (res.ok) {
-        const data = await res.json()
-        const plan = data.pricing.find((p: PricingPlan) => p.membershipType === type)
-        setRenewForm(prev => ({
-          ...prev,
-          customPrice: plan?.amount ?? 0
-        }))
-      }
-    } catch (e) {
-      console.error("Failed to fetch plan price", e)
-    }
-  }
 
   // Delete handler
   const handleDelete = async () => {
@@ -391,7 +326,7 @@ export default function MemberProfilePage() {
   const editMembershipType = watchEdit("membershipType")
   const editStartDate = watchEdit("startDate")
   useEffect(() => {
-    if (editMembershipType !== "PERSONAL_TRAINING" && editStartDate) {
+    if (editMembershipType !== "OTHERS" && editStartDate) {
       const start = new Date(editStartDate)
       if (!isNaN(start.getTime())) {
         const durations: Record<string, number> = { MONTHLY: 30, QUARTERLY: 90, HALF_YEARLY: 180, ANNUAL: 365 }
@@ -441,7 +376,7 @@ export default function MemberProfilePage() {
   const [calculatedEndDate, setCalculatedEndDate] = useState<string>("")
 
   useEffect(() => {
-    if (renewalMembershipType !== "PERSONAL_TRAINING" && renewalStartDate) {
+    if (renewalMembershipType !== "OTHERS" && renewalStartDate) {
       const start = new Date(renewalStartDate)
       if (!isNaN(start.getTime())) {
         const durations: Record<string, number> = { MONTHLY: 30, QUARTERLY: 90, HALF_YEARLY: 180, ANNUAL: 365 }
@@ -470,9 +405,10 @@ export default function MemberProfilePage() {
         action: "renew",
         membershipType: data.membershipType,
         startDate: data.startDate,
-        customPrice: data.customPrice ? Number(data.customPrice) : undefined
+        customPrice: data.customPrice ? Number(data.customPrice) : undefined,
+        manualPlanName: data.manualPlanName
       }
-      if (data.membershipType === "PERSONAL_TRAINING" && data.endDate) {
+      if (data.membershipType === "OTHERS" && data.endDate) {
         payload.endDate = data.endDate
       }
       const res = await fetch(`/api/members/${id}`, {
@@ -502,7 +438,7 @@ export default function MemberProfilePage() {
     switch(plan) {
       case "MONTHLY": return "Monthly"; case "QUARTERLY": return "Quarterly"; 
       case "HALF_YEARLY": return "Half Yearly"; case "ANNUAL": return "Annual"; 
-      case "PERSONAL_TRAINING": return "Personal Training"; default: return plan;
+      case "OTHERS": return "Others"; default: return plan;
     }
   }
   const formatDate = (dateStr: string) => {
@@ -514,15 +450,6 @@ export default function MemberProfilePage() {
   }
   const formatTime = (isoStr: string) => new Date(isoStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
 
-  // Helper to calculate end date for renewal
-  const calculateEndDate = (startDate: string, membershipType: string): string => {
-    if (!startDate) return ""
-    const daysMap: Record<string, number> = { MONTHLY: 30, QUARTERLY: 90, HALF_YEARLY: 180, ANNUAL: 365 }
-    const days = daysMap[membershipType] || 30
-    const start = new Date(startDate)
-    const end = new Date(start.getTime() + days * 24 * 60 * 60 * 1000)
-    return end.toISOString().split('T')[0]
-  }
 
   if (loading) {
     return (
@@ -1071,9 +998,20 @@ export default function MemberProfilePage() {
                   <option value="QUARTERLY">Quarterly</option>
                   <option value="HALF_YEARLY">Half-Yearly</option>
                   <option value="ANNUAL">Annual</option>
-                  <option value="PERSONAL_TRAINING">Personal Training</option>
+                  <option value="OTHERS">Others (Manual Entry)</option>
                 </select>
               </div>
+
+              {renewalMembershipType === "OTHERS" && (
+                <div className="animate-fade">
+                  <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Custom Plan Name</label>
+                  <input
+                    {...regRenewal("manualPlanName")}
+                    placeholder="e.g. Boxing 10 Sessions"
+                    className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 mb-4"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Start Date</label>
@@ -1085,8 +1023,8 @@ export default function MemberProfilePage() {
               </div>
 
               <div>
-                <label className={`text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5 ${renewalMembershipType === "PERSONAL_TRAINING" ? "text-[#555555]" : "text-[#333333]"}`}>End Date</label>
-                {renewalMembershipType === "PERSONAL_TRAINING" ? (
+                <label className={`text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5 ${renewalMembershipType === "OTHERS" ? "text-[#555555]" : "text-[#333333]"}`}>End Date</label>
+                {renewalMembershipType === "OTHERS" ? (
                   <input
                     {...regRenewal("endDate")}
                     type="date"
@@ -1186,9 +1124,34 @@ export default function MemberProfilePage() {
                   <option value="QUARTERLY">Quarterly</option>
                   <option value="HALF_YEARLY">Half-Yearly</option>
                   <option value="ANNUAL">Annual</option>
-                  <option value="PERSONAL_TRAINING">Personal Training</option>
+                  <option value="OTHERS">Others (Manual Entry)</option>
                 </select>
               </div>
+
+              {editMembershipType === "OTHERS" && (
+                <div className="space-y-5 animate-fade">
+                  <div>
+                    <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Custom Plan Name</label>
+                    <input
+                      {...regEdit("manualPlanName")}
+                      placeholder="e.g. Cricket Coaching"
+                      className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Plan Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
+                      <input
+                        {...regEdit("manualAmount", { valueAsNumber: true })}
+                        type="number"
+                        placeholder="5000"
+                        className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-medium"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1200,13 +1163,13 @@ export default function MemberProfilePage() {
                   />
                 </div>
                 <div>
-                  <label className={`text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5 ${editMembershipType === "PERSONAL_TRAINING" ? "text-[#555555]" : "text-[#333333]"}`}>End Date</label>
+                  <label className={`text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5 ${editMembershipType === "OTHERS" ? "text-[#555555]" : "text-[#333333]"}`}>End Date</label>
                   <input
                     {...regEdit("endDate")}
                     type="date"
-                    disabled={editMembershipType !== "PERSONAL_TRAINING"}
+                    disabled={editMembershipType !== "OTHERS"}
                     className={`w-full bg-[#0F0F0F] border border-[#242424] text-[14px] rounded-lg px-3 py-3 transition-all duration-200 [color-scheme:dark]
-                      ${editMembershipType !== "PERSONAL_TRAINING" ? "text-[#555555] opacity-50 cursor-not-allowed" : "text-white focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none cursor-pointer"}
+                      ${editMembershipType !== "OTHERS" ? "text-[#555555] opacity-50 cursor-not-allowed" : "text-white focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none cursor-pointer"}
                     `}
                   />
                 </div>
@@ -1236,105 +1199,6 @@ export default function MemberProfilePage() {
         </div>
       )}
 
-      {/* RENEWAL MODAL */}
-      {showRenewalModal && member && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setShowRenewalModal(false)} />
-          <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[440px] w-full relative z-10 animate-modal shadow-2xl shadow-black/50 overflow-y-auto max-h-[90vh]">
-            <h2 className="text-white text-[18px] font-black tracking-tight">Renew Membership</h2>
-            <p className="text-[#444444] text-[13px] mt-1">{member.name}</p>
-            
-            <div className="border-t border-[#1C1C1C] my-4" />
-            
-            <div className="space-y-5">
-              <div>
-                <label className="text-[#555555] text-[10px] font-bold tracking-widest uppercase block mb-1.5">Membership Plan</label>
-                <select
-                  value={renewForm.membershipType}
-                  onChange={(e) => {
-                    const newType = e.target.value
-                    setRenewForm(prev => ({ ...prev, membershipType: newType }))
-                    fetchPlanPrice(newType)
-                  }}
-                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 cursor-pointer appearance-none"
-                >
-                  <option value="MONTHLY">Monthly</option>
-                  <option value="QUARTERLY">Quarterly</option>
-                  <option value="HALF_YEARLY">Half-Yearly</option>
-                  <option value="ANNUAL">Annual</option>
-                  <option value="PERSONAL_TRAINING">Personal Training</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[#555555] text-[10px] font-bold tracking-widest uppercase block mb-1.5">Start Date</label>
-                <input
-                  type="date"
-                  value={renewForm.startDate}
-                  onChange={(e) => setRenewForm(prev => ({ ...prev, startDate: e.target.value }))}
-                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-3 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 scheme-dark cursor-pointer"
-                />
-              </div>
-
-              <div>
-                <label className={`text-[10px] font-bold tracking-widest uppercase block mb-1.5 ${renewForm.membershipType === "PERSONAL_TRAINING" ? "text-[#555555]" : "text-[#333333]"}`}>End Date</label>
-                {renewForm.membershipType === "PERSONAL_TRAINING" ? (
-                  <input
-                    type="date"
-                    value={renewForm.endDate}
-                    onChange={(e) => setRenewForm(prev => ({ ...prev, endDate: e.target.value }))}
-                    className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-3 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 scheme-dark cursor-pointer"
-                    required
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    disabled
-                    value={calculateEndDate(renewForm.startDate, renewForm.membershipType)}
-                    className="w-full bg-[#0F0F0F] border border-[#242424] text-[#555555] text-[14px] rounded-lg px-3 py-3 opacity-50 cursor-not-allowed scheme-dark"
-                  />
-                )}
-              </div>
-
-              <div>
-                <label className="text-[#555555] text-[10px] font-bold tracking-widest uppercase block mb-1.5">Plan Amount</label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
-                  <input
-                    type="number"
-                    value={renewForm.customPrice}
-                    onChange={(e) => setRenewForm(prev => ({ ...prev, customPrice: Number(e.target.value) }))}
-                    className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-medium"
-                  />
-                </div>
-              </div>
-
-              {renewError && (
-                <p className="text-[#D11F00] text-[12px] mt-2">{renewError}</p>
-              )}
-
-              <div className="pt-4 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowRenewalModal(false)}
-                  className="w-1/3 bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] font-bold text-[12px] tracking-widest uppercase py-3 rounded-lg transition-all duration-200 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleRenewal}
-                  disabled={renewLoading}
-                  className={`w-2/3 text-white font-bold text-[12px] tracking-widest uppercase py-3 rounded-lg transition-all duration-200 flex items-center justify-center
-                    ${renewLoading ? "bg-[#D11F00] opacity-70 cursor-not-allowed" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
-                  `}
-                >
-                  {renewLoading ? "Renewing..." : "Renew Membership"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* DELETE CONFIRMATION MODAL */}
       {showDeleteModal && member && (

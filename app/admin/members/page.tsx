@@ -9,7 +9,7 @@ interface Member {
   id: string
   name: string
   phone: string
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING"
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   startDate: string
   endDate: string
   status: "ACTIVE" | "INACTIVE" | "DELETED"
@@ -66,7 +66,7 @@ export default function MembersPage() {
       case "QUARTERLY": return "Quarterly"
       case "HALF_YEARLY": return "Half Yearly"
       case "ANNUAL": return "Annual"
-      case "PERSONAL_TRAINING": return "Personal"
+      case "OTHERS": return "Others"
       default: return plan
     }
   }
@@ -76,7 +76,7 @@ export default function MembersPage() {
     "Quarterly":   "QUARTERLY",
     "Half-Yearly": "HALF_YEARLY",
     "Annual":      "ANNUAL",
-    "Personal":    "PERSONAL_TRAINING",
+    "Others":      "OTHERS",
   }
 
   const planCounts = members.reduce((acc, m) => {
@@ -217,7 +217,7 @@ export default function MembersPage() {
 
       {/* PLAN FILTER ROW */}
       <div className="mt-3 flex gap-2 flex-wrap">
-        {["All Plans", "Monthly", "Quarterly", "Half-Yearly", "Annual", "Personal"].map(tab => {
+        {["All Plans", "Monthly", "Quarterly", "Half-Yearly", "Annual", "Others"].map(tab => {
           const isActive = planFilter === tab
           const enumKey = planMap[tab]
           const count = enumKey ? planCounts[enumKey] ?? 0 : null

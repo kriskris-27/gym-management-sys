@@ -28,7 +28,7 @@ export const MembershipTypeEnum = z.enum([
   "QUARTERLY",
   "HALF_YEARLY",
   "ANNUAL",
-  "PERSONAL_TRAINING",
+  "OTHERS",
 ]);
 
 export const PaymentModeEnum = z.enum(["CASH", "UPI", "CARD"]);
@@ -59,6 +59,8 @@ export const MemberCreateSchema = z.object({
     },
     z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high").default(0)
   ),
+  manualPlanName: z.string().trim().max(100).optional(),
+  manualAmount: z.coerce.number().min(0).max(99999).optional(),
 }).strict()
 .refine((data) => {
   if (data.endDate && data.startDate && data.endDate <= data.startDate) return false;
@@ -68,12 +70,26 @@ export const MemberCreateSchema = z.object({
   path: ["endDate"],
 })
 .refine((data) => {
-  // Hard block for Personal Training if end date is missing
-  if (data.membershipType === "PERSONAL_TRAINING" && !data.endDate) return false;
+  // Hard block for OTHERS if end date is missing
+  if (data.membershipType === "OTHERS" && !data.endDate) return false;
   return true;
 }, {
-  message: "Personal training requires an end date",
+  message: "Others membership requires an end date",
   path: ["endDate"],
+})
+.refine((data) => {
+  if (data.membershipType === "OTHERS" && !data.manualPlanName) return false;
+  return true;
+}, {
+  message: "Others membership requires a plan name",
+  path: ["manualPlanName"],
+})
+.refine((data) => {
+  if (data.membershipType === "OTHERS" && (data.manualAmount === undefined || data.manualAmount === null)) return false;
+  return true;
+}, {
+  message: "Others membership requires a manual amount",
+  path: ["manualAmount"],
 });
 
 /**
@@ -98,6 +114,8 @@ export const MemberUpdateSchema = z.object({
     (val) => (val === "" || val === null || val === undefined) ? 0 : Number(val),
     z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high").optional()
   ),
+  manualPlanName: z.string().trim().max(100).optional(),
+  manualAmount: z.coerce.number().min(0).max(99999).optional(),
 }).strict()
 .refine((data) => {
   if (data.endDate && data.startDate && data.endDate <= data.startDate) return false;
@@ -169,14 +187,15 @@ export const RenewMemberSchema = z.object({
   action: z.literal("renew"),
   membershipType: z.enum([
     "MONTHLY", "QUARTERLY", "HALF_YEARLY",
-    "ANNUAL", "PERSONAL_TRAINING"
+    "ANNUAL", "OTHERS"
   ]).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   customPrice: z.coerce.number()
     .min(0, "Price cannot be negative")
     .max(99999, "Price too large")
-    .optional()
+    .optional(),
+  manualPlanName: z.string().optional(), 
 }).strict();
 
 /**
