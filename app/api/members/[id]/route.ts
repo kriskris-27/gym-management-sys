@@ -24,6 +24,10 @@ export async function GET(
           take: 1,
           select: { checkIn: true },
         },
+        subscriptions: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        }
       },
     })
 
@@ -32,12 +36,15 @@ export async function GET(
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
 
-    const { _count, sessions, ...memberData } = member
+    const { _count, sessions, subscriptions, ...memberData } = member
+    const latestSubscription = subscriptions[0] || null
 
-    // Simplified response without fields that don't exist in schema
     return NextResponse.json({
       member: {
         ...memberData,
+        membershipType: latestSubscription?.planNameSnapshot || "NONE",
+        startDate: latestSubscription?.startDate || null,
+        endDate: latestSubscription?.endDate || null,
         attendanceCount: _count.sessions,
         lastVisited: sessions[0]?.checkIn || null,
       },
@@ -79,46 +86,64 @@ export async function PUT(
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
 
-    // 2. Prepare payload with proper typing
-    const finalUpdatePayload: Record<string, unknown> = { ...updateData }
-    // Remove id from payload if present
-    delete finalUpdatePayload.id
-    
-    // Status can only be changed via DELETE and PATCH
-    delete finalUpdatePayload.status
+    // 2. Perform update in a transaction to handle member and subscription
+    const updatedMember = await prisma.$transaction(async (tx) => {
+      // A. Update core member data
+      const m = await tx.member.update({
+        where: { id },
+        data: {
+          name: updateData.name,
+          phone: updateData.phone,
+          phoneNormalized: updateData.phone ? updateData.phone.replace(/\D/g, '') : undefined,
+          status: updateData.status
+        },
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          status: true,
+          lastCheckinAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
 
-    // 3. Log any subscription-related fields that were submitted (but not handled here)
-    if ('membershipType' in updateData) {
-      console.log(`[Member Edit] membershipType update requested but should be handled via subscription service`)
-      delete finalUpdatePayload.membershipType
-    }
-    if ('startDate' in updateData) {
-      console.log(`[Member Edit] startDate update requested but should be handled via subscription service`)
-      delete finalUpdatePayload.startDate
-    }
-    if ('endDate' in updateData) {
-      console.log(`[Member Edit] endDate update requested but should be handled via subscription service`)
-      delete finalUpdatePayload.endDate
-    }
-    if ('customPrice' in updateData) {
-      console.log(`[Member Edit] customPrice update requested but should be handled via subscription service`)
-      delete finalUpdatePayload.customPrice
-    }
+      // B. Update subscription if relevant fields are provided
+      if (updateData.membershipType || updateData.startDate || updateData.endDate) {
+        const latestSub = await tx.subscription.findFirst({
+          where: { memberId: id },
+          orderBy: { createdAt: 'desc' }
+        })
 
-    // 4. Perform the update
-    const updatedMember = await prisma.member.update({
-      where: { id },
-      data: finalUpdatePayload,
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        email: true,
-        status: true,
-        lastCheckinAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+        if (latestSub) {
+          // If membershipType changed, we might need plan details
+          let planId = latestSub.planId
+          let planName = latestSub.planNameSnapshot
+
+          if (updateData.membershipType && updateData.membershipType !== latestSub.planNameSnapshot) {
+            const plan = await tx.plan.findUnique({
+              where: { name: updateData.membershipType }
+            })
+            if (plan) {
+              planId = plan.id
+              planName = plan.name
+            }
+          }
+
+          await tx.subscription.update({
+            where: { id: latestSub.id },
+            data: {
+              planId,
+              planNameSnapshot: planName,
+              startDate: updateData.startDate,
+              endDate: updateData.endDate
+              // Note: We don't change price on simple edit unless explicitly requested
+            }
+          })
+        }
+      }
+
+      return m
     })
 
     return NextResponse.json({ member: updatedMember })

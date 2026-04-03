@@ -14,7 +14,7 @@ const schema = z.object({
   membershipType: z.enum([
     "MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "PERSONAL_TRAINING"
   ]),
-  customPrice: z.number().min(0, "Price cannot be negative").max(99999, "Price too high"),
+  discountAmount: z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high"),
   startDate: z.string().min(1, "Start date required"),
   endDate: z.string().optional()
 }).refine(data => {
@@ -42,6 +42,8 @@ export default function AddMemberPage() {
   const [generalError, setGeneralError] = useState("")
 
   const [priceLoading, setPriceLoading] = useState(false)
+  const [plans, setPlans] = useState<PricingPlan[]>([])
+  const [basePrice, setBasePrice] = useState(0)
 
   const getTodayStr = () => {
     const now = new Date()
@@ -50,31 +52,27 @@ export default function AddMemberPage() {
     return istNow.toISOString().split("T")[0]
   }
 
-  const fetchPlanPrice = async (type: string) => {
-    setPriceLoading(true)
-    console.log("🔍 fetchPlanPrice called with type:", type)
-    try {
-      const res = await fetch("/api/settings/pricing")
-      const data = await res.json()
-      console.log("📊 Pricing API response:", data)
-      const plan = data.pricing?.find((p: PricingPlan) => p.membershipType === type)
-      console.log("💰 Found plan:", plan)
-      const priceToSet = plan?.amount ?? 0
-      console.log("💵 Setting customPrice to:", priceToSet, typeof priceToSet)
-      setValue("customPrice", priceToSet, { shouldValidate: false })
-      
-      // Log the form value after setting
-      setTimeout(() => {
-        const currentValue = watch("customPrice")
-        console.log("👀 customPrice value after setValue:", currentValue, typeof currentValue)
-      }, 100)
-    } catch (error) {
-      console.error("❌ fetchPlanPrice error:", error)
-      setValue("customPrice", 0, { shouldValidate: false })
-    } finally {
-      setPriceLoading(false)
+  // Load all plans on mount
+  useEffect(() => {
+    const loadPlans = async () => {
+      setPriceLoading(true)
+      try {
+        const res = await fetch("/api/settings/pricing")
+        const data = await res.json()
+        if (data.pricing) {
+          setPlans(data.pricing)
+          // Find initial plan amount
+          const initial = data.pricing.find((p: PricingPlan) => p.membershipType === "MONTHLY")
+          setBasePrice(initial?.amount || 0)
+        }
+      } catch (error) {
+        console.error("❌ loadPlans error:", error)
+      } finally {
+        setPriceLoading(false)
+      }
     }
-  }
+    loadPlans()
+  }, [])
 
   const {
     register,
@@ -87,7 +85,7 @@ export default function AddMemberPage() {
     resolver: zodResolver(schema),
     defaultValues: {
       membershipType: "MONTHLY",
-      customPrice: 0,
+      discountAmount: 0,
       startDate: getTodayStr(),
       endDate: ""
     }
@@ -95,20 +93,19 @@ export default function AddMemberPage() {
 
   const startDate = watch("startDate")
   const membershipType = watch("membershipType")
-  const customPrice = watch("customPrice")
+  const discountAmount = watch("discountAmount")
+  const finalAmount = Math.max(0, basePrice - (discountAmount || 0))
 
-  // Log customPrice changes
+  // Instant local lookup when membershipType changes
   useEffect(() => {
-    console.log("👀 customPrice value changed:", customPrice, typeof customPrice)
-  }, [customPrice])
-
-  // Auto-fetch plan price when membershipType changes
-  useEffect(() => {
-    if (membershipType) {
-      fetchPlanPrice(membershipType)
+    if (membershipType && plans.length > 0) {
+      const found = plans.find((p: PricingPlan) => p.membershipType === membershipType)
+      const price = found?.amount || 0
+      setBasePrice(price)
+      // Reset discount if plan changes, to be safe
+      setValue("discountAmount", 0, { shouldValidate: true })
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [membershipType])
+  }, [membershipType, plans, setValue])
 
   // Auto-calculate end date
   useEffect(() => {
@@ -126,38 +123,28 @@ export default function AddMemberPage() {
         setValue("endDate", end.toISOString().split("T")[0], { shouldValidate: true })
       }
     } else if (membershipType === "PERSONAL_TRAINING") {
-      // Clear auto-calculated end date to force manual entry
       setValue("endDate", "", { shouldValidate: true })
     }
   }, [startDate, membershipType, setValue])
 
   const onSubmit = async (data: FormData) => {
-    console.log("🚀 onSubmit called with form data:", data)
-    console.log("📋 customPrice value:", data.customPrice, typeof data.customPrice)
-    
     setLoading(true)
     setGeneralError("")
     
     try {
-      // Transform data to match API expectations
       const transformedData = {
         ...data,
         startDate: new Date(data.startDate),
         endDate: data.endDate ? new Date(data.endDate) : undefined,
         status: "ACTIVE" as const
-        // customPrice is now handled by schema validation (number or string)
       }
-      
-      console.log("🔄 Transformed data for API:", transformedData)
-      console.log("💰 customPrice in transformed data:", transformedData.customPrice, typeof transformedData.customPrice)
       
       const result = await createMemberMutation.mutateAsync(transformedData)
       setSuccess(true)
       setTimeout(() => {
-        router.push(`/admin/members/${result.member.id}`) // Redirect to member detail page
+        router.push(`/admin/members/${result.member.id}`)
       }, 1000)
     } catch (error) {
-      console.error("❌ onSubmit error:", error)
       if (error instanceof Error) {
         if (error.message.includes("phone")) {
           setError("phone", { message: "A member with this phone already exists" })
@@ -264,44 +251,45 @@ export default function AddMemberPage() {
             </div>
           </div>
 
-          {/* FIELD 4: Plan Amount */}
-          <div>
-            <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-2">
-              Plan Amount
-            </label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#555555] text-[14px] font-medium select-none">₹</span>
+          {/* PRICING SECTION: Base, Discount, Final */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 p-4 bg-[#0A0A0A] border border-[#1C1C1C] rounded-lg">
+            {/* Base Price */}
+            <div>
+               <label className="text-[#444444] text-[9px] font-bold tracking-[0.15em] uppercase block mb-2">
+                Base Price
+              </label>
+              <div className="text-[16px] font-bold text-[#666666] pt-1">
+                ₹{basePrice || 0}
+              </div>
+            </div>
+
+            {/* Discount Input */}
+            <div>
+              <label className="text-[#555555] text-[9px] font-bold tracking-[0.15em] uppercase block mb-2">
+                Discount (₹)
+              </label>
               <input
-                {...register("customPrice", {
-                  valueAsNumber: true, // Ensure the value is treated as a number
-                  onChange: (e) => {
-                    const value = e.target.value
-                    // Convert to number and update form state
-                    const numValue = value === "" ? 0 : Number(value)
-                    setValue("customPrice", isNaN(numValue) ? 0 : numValue, { shouldValidate: true })
-                  }
-                })}
+                {...register("discountAmount", { valueAsNumber: true })}
                 type="number"
                 min="0"
-                max="99999"
                 placeholder="0"
-                className={`w-full bg-[#0F0F0F] border ${
-                  errors.customPrice ? 'border-[#D11F00]' : 'border-[#242424]'
-                } text-white text-[14px] rounded-lg pl-9 pr-4 py-3.5 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200`}
+                className={`w-full bg-[#0F0F0F] border ${errors.discountAmount ? 'border-[#D11F00]' : 'border-[#242424]'} text-white text-[14px] rounded-lg px-3 py-2.5 focus:border-[#D11F00] focus:outline-none transition-all`}
               />
-              {priceLoading && (
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[#444444] text-[11px]">fetching...</span>
-              )}
             </div>
-            {errors.customPrice && (
-              <p className="text-[#D11F00] text-[11px] mt-1.5 animate-error">{errors.customPrice.message as string}</p>
-            )}
-            {isPersonalTraining && !errors.customPrice ? (
-              <p className="text-[#D11F00] text-[11px] mt-1.5 italic">Set custom amount for this member</p>
-            ) : (
-              <p className="text-[#333333] text-[11px] mt-1.5 italic">Pre-filled from plan pricing. Edit to give discount.</p>
-            )}
+
+            {/* Final Total */}
+            <div>
+              <label className="text-[#D11F00] text-[9px] font-bold tracking-[0.15em] uppercase block mb-2">
+                Total to Pay
+              </label>
+              <div className="text-[18px] font-black text-white pt-0.5">
+                ₹{finalAmount}
+              </div>
+            </div>
           </div>
+          {errors.discountAmount && (
+            <p className="text-[#D11F00] text-[11px] mt-1 animate-error">{errors.discountAmount.message as string}</p>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {/* FIELD 4: Start Date */}
@@ -334,7 +322,7 @@ export default function AddMemberPage() {
                 `}
               />
               {!isPersonalTraining && (
-                <p className="text-[#333333] text-[11px] mt-1.5 font-medium leading-tight">Auto-calculated from plan</p>
+                <p className="text-[#333333] text-[11px] mt-1.5 font-medium leading-tight">Auto-calculated</p>
               )}
               {isPersonalTraining && errors.endDate && (
                 <p className="text-[#D11F00] text-[11px] mt-1.5 animate-error">{errors.endDate.message}</p>

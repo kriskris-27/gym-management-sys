@@ -51,16 +51,13 @@ export const MemberCreateSchema = z.object({
   membershipType: MembershipTypeEnum.optional(),
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
-  customPrice: z.preprocess(
+  discountAmount: z.preprocess(
     (val) => {
-      // Handle all possible input types
-      if (val === "" || val === null || val === undefined) {
-        return null
-      }
+      if (val === "" || val === null || val === undefined) return 0
       const num = Number(val)
-      return isNaN(num) ? null : num
+      return isNaN(num) ? 0 : num
     },
-    z.number().min(0, "Custom price cannot be negative").max(99999, "Custom price too high").nullable().optional()
+    z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high").default(0)
   ),
 }).strict()
 .refine((data) => {
@@ -97,9 +94,9 @@ export const MemberUpdateSchema = z.object({
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
   status: MemberStatusEnum.optional(),
-  customPrice: z.preprocess(
-    (val) => (val === "" || val === null || val === undefined) ? null : Number(val),
-    z.number().min(0, "Custom price cannot be negative").max(99999, "Custom price too high").nullable().optional()
+  discountAmount: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined) ? 0 : Number(val),
+    z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high").optional()
   ),
 }).strict()
 .refine((data) => {

@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useMembers } from "@/hooks/useMembers"
+import { useRestoreMember } from "@/hooks/useRestoreMember"
 
 interface Member {
   id: string
@@ -25,11 +26,11 @@ interface Member {
 
 export default function MembersPage() {
   const router = useRouter()
+  const restoreMemberMutation = useRestoreMember()
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("All")
   const [planFilter, setPlanFilter] = useState("All Plans")
   const [paymentFilter, setPaymentFilter] = useState("All Payments")
-  const [restoringId, setRestoringId] = useState<string | null>(null)
 
   const statusMap: Record<string, string | undefined> = {
     "All": undefined,
@@ -38,7 +39,7 @@ export default function MembersPage() {
     "Deleted": "DELETED"
   }
   
-  const { data: rawData, isLoading: loading, refetch } = useMembers(undefined, statusMap[statusFilter])
+  const { data: rawData, isLoading: loading } = useMembers(undefined, statusMap[statusFilter])
   const members: Member[] = rawData?.members ?? []
 
 
@@ -47,7 +48,7 @@ export default function MembersPage() {
   // Date Helpers
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "-";
-    const datePart = dateStr.split("T")[0];
+    const datePart = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr.split(" ")[0];
     const [year, month, day] = datePart.split("-");
     const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`;
@@ -120,20 +121,10 @@ export default function MembersPage() {
 
   const handleRestore = async (memberId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    setRestoringId(memberId)
     try {
-      const res = await fetch(`/api/members/${memberId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "restore" })
-      })
-      if (res.ok) {
-        refetch()
-      }
+      await restoreMemberMutation.mutateAsync(memberId)
     } catch (error) {
       console.error(error)
-    } finally {
-      setRestoringId(null)
     }
   }
 
@@ -392,10 +383,10 @@ export default function MembersPage() {
                         {member.status === "DELETED" ? (
                           <button
                             onClick={(e) => handleRestore(member.id, e)}
-                            disabled={restoringId === member.id}
+                            disabled={restoreMemberMutation.isPending}
                             className="text-[#D11F00] hover:text-[#FF6B00] text-[12px] font-medium transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer"
                           >
-                            {restoringId === member.id ? (
+                            {restoreMemberMutation.isPending && restoreMemberMutation.variables === member.id ? (
                               <>
                                 <svg className="w-3 h-3 animate-spin" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/></svg>
                                 Restoring...

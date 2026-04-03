@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import prisma from "@/lib/prisma"
 import { PricingUpdateSchema } from "@/lib/validations"
 
 const ORDER: ("MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING")[] = [
@@ -12,11 +12,12 @@ const ORDER: ("MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRA
 
 export async function GET() {
   try {
-    const pricingFromDb = await prisma.planPricing.findMany({
-      select: { membershipType: true, amount: true }
+    const plans = await prisma.plan.findMany({
+      where: { isActive: true },
+      select: { name: true, price: true }
     })
 
-    const dbMap = new Map(pricingFromDb.map((p: any) => [p.membershipType, p.amount]))
+    const dbMap = new Map(plans.map((p: any) => [p.name, p.price]))
 
     const pricing = ORDER.map(type => ({
       membershipType: type,
@@ -41,36 +42,39 @@ export async function PUT(request: Request) {
 
     const inputPricing = validated.data.pricing
 
-    // Deduplicate by membershipType (last wins)
-    const uniqueMap = new Map<"MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING", number>()
-    for (const p of inputPricing) {
-      uniqueMap.set(p.membershipType as "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "PERSONAL_TRAINING", p.amount)
+    const DURATIONS: Record<string, number> = {
+      "MONTHLY": 30,
+      "QUARTERLY": 90,
+      "HALF_YEARLY": 180,
+      "ANNUAL": 365,
+      "PERSONAL_TRAINING": 30 // Default for PT, can be adjusted
     }
 
-    const recordsToUpdate = Array.from(uniqueMap.entries()).map(([type, amount]) => ({
-      membershipType: type,
-      amount
-    }))
-
-    // Upsert concurrently
-    await Promise.all(
-      recordsToUpdate.map(p => 
-        prisma.planPricing.upsert({
-          where: { membershipType: p.membershipType },
-          update: { amount: p.amount },
-          create: { membershipType: p.membershipType, amount: p.amount }
+    // Upsert the Plan table based on the pricing input
+    await prisma.$transaction(
+      inputPricing.map(p => 
+        prisma.plan.upsert({
+          where: { name: p.membershipType },
+          update: { price: p.amount },
+          create: { 
+            name: p.membershipType, 
+            price: p.amount,
+            durationDays: DURATIONS[p.membershipType] || 30
+          }
         })
       )
     )
 
-    // Re-fetch sorted to send back complete accurate dataset natively
-    const pricingFromDb = await prisma.planPricing.findMany({
-      select: { membershipType: true, amount: true }
+    // Re-fetch sorted data to return
+    const updatedPlans = await prisma.plan.findMany({
+      where: { isActive: true },
+      select: { name: true, price: true }
     })
     
-    // Sort array in memory
-    const updatedPricing = ORDER
-      .map(type => pricingFromDb.find((p: any) => p.membershipType === type) || { membershipType: type, amount: 0 })
+    const updatedPricing = ORDER.map(type => {
+      const found = updatedPlans.find((p: any) => p.name === type);
+      return { membershipType: type, amount: found ? found.price : 0 };
+    });
 
     return NextResponse.json({ success: true, pricing: updatedPricing })
 
@@ -79,4 +83,3 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Failed to update pricing" }, { status: 500 })
   }
 }
-

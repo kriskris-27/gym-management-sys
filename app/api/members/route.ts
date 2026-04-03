@@ -83,37 +83,111 @@ export async function POST(request: Request) {
 
     const data = validated.data
 
-    // Create member with new schema (no old fields)
-    const member = await prisma.member.create({
-      data: {
-        name: data.name,
-        phone: data.phone,
-        phoneNormalized: data.phone.replace(/\D/g, ''), // Remove non-digits for normalized phone
-        status: data.status || "ACTIVE",
-        // Note: membershipType, startDate, endDate, customPrice are now handled by subscriptions
-      },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        status: true,
-        createdAt: true,
-        lastCheckinAt: true,
-        updatedAt: true,
-      },
-    })
+    // Use a transaction to ensure Member, Subscription, and Payment are created atomically
+    const member = await prisma.$transaction(async (tx) => {
+      const newMember = await tx.member.create({
+        data: {
+          name: data.name,
+          phone: data.phone,
+          phoneNormalized: data.phone.replace(/\D/g, ''), 
+          status: data.status || "ACTIVE",
+        },
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          status: true,
+          createdAt: true,
+          lastCheckinAt: true,
+          updatedAt: true,
+        },
+      })
 
-    // TODO: Create subscription if membershipType is provided
-    // This would use domain functions in the future
-    if (data.membershipType && data.startDate) {
-      console.log("📝 TODO: Create subscription for member", member.id)
-      // Future: await createSubscriptionWithDate(member.id, planId, customPrice, startDate)
-    }
+      if (data.membershipType && data.startDate) {
+        // Fetch plan to get duration and base price
+        const plan = await tx.plan.findUnique({
+          where: { name: data.membershipType }
+        })
+
+        if (!plan) {
+          throw new Error(`Plan error: '${data.membershipType}' not found in database. Please configure pricing first.`)
+        }
+
+        // Calculate end date strictly server-side if it isn't explicitly provided
+        let resolvedEndDate = data.endDate;
+        if (!resolvedEndDate) {
+          resolvedEndDate = new Date(data.startDate);
+          resolvedEndDate.setDate(resolvedEndDate.getDate() + plan.durationDays);
+        }
+
+        const discount = data.discountAmount || 0;
+        const finalPrice = Math.max(0, plan.price - discount);
+
+        // 1. Create Subscription
+        const subscription = await tx.subscription.create({
+          data: {
+            memberId: newMember.id,
+            planId: plan.id,
+            startDate: data.startDate,
+            endDate: resolvedEndDate,
+            status: "ACTIVE",
+            planNameSnapshot: plan.name,
+            planPriceSnapshot: finalPrice,
+          }
+        })
+
+        // 2. Create Payment Record
+        await tx.payment.create({
+          data: {
+            memberId: newMember.id,
+            subscriptionId: subscription.id,
+            baseAmount: plan.price,
+            discountAmount: discount,
+            finalAmount: finalPrice,
+            method: "CASH", 
+            status: "SUCCESS",
+            purpose: "SUBSCRIPTION"
+          }
+        })
+
+        // 3. Log Audit Event
+        await tx.auditLog.create({
+          data: {
+            entityType: "MEMBER",
+            entityId: newMember.id,
+            action: "CREATED_WITH_SUBSCRIPTION",
+            after: { 
+              name: newMember.name, 
+              plan: plan.name,
+              baseAmount: plan.price,
+              discountAmount: discount,
+              finalAmount: finalPrice 
+            }
+          }
+        })
+      } else {
+         // Audit log for plain member
+         await tx.auditLog.create({
+          data: {
+            entityType: "MEMBER",
+            entityId: newMember.id,
+            action: "CREATED",
+            after: { name: newMember.name }
+          }
+        })
+      }
+
+      return newMember
+    })
 
     return NextResponse.json({ member }, { status: 201 })
 
   } catch (error) {
     console.error("❌ API ERROR [POST /api/members]:", error)
+
+    if (error instanceof Error && error.message.includes("Plan error")) {
+       return NextResponse.json({ error: error.message }, { status: 400 })
+    }
 
     // Handle specific Prisma duplicate constraint
     if (error && typeof error === "object" && "code" in error && error.code === "P2002") {

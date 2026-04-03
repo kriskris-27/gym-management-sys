@@ -83,12 +83,7 @@ const memberSchema = z.object({
   status: z.enum(["ACTIVE", "INACTIVE", "DELETED"])
 })
 
-type PaymentFormData = {
-  amount: number
-  date: string
-  mode: "CASH" | "UPI" | "CARD"
-  notes?: string
-}
+type PaymentFormData = z.input<typeof paymentSchema>
 type MemberFormData = z.infer<typeof memberSchema>
 
 export default function MemberProfilePage() {
@@ -386,8 +381,8 @@ export default function MemberProfilePage() {
         name: member.name,
         phone: member.phone,
         membershipType: member.membershipType,
-        startDate: member.startDate.split('T')[0],
-        endDate: member.endDate.split('T')[0],
+        startDate: member.startDate ? (typeof member.startDate === 'string' ? member.startDate.split('T')[0] : member.startDate.toISOString().split('T')[0]) : getTodayStr(),
+        endDate: member.endDate ? (typeof member.endDate === 'string' ? member.endDate.split('T')[0] : member.endDate.toISOString().split('T')[0]) : "",
         status: member.status
       })
     }
@@ -550,10 +545,10 @@ export default function MemberProfilePage() {
   }
 
   const now = new Date()
-  const isExpired = new Date(member.endDate) < now
-  const daysLeft = Math.ceil((new Date(member.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  const isExpired = member.endDate ? new Date(member.endDate) < now : true
+  const daysLeft = member.endDate ? Math.ceil((new Date(member.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : 0
   const isExpiringSoon = daysLeft >= 0 && daysLeft <= 7
-  const initial = member.name.charAt(0).toUpperCase()
+  const initial = member.name?.charAt(0).toUpperCase() || "?"
 
   const totalPages = Math.ceil(attendance.total / ATTENDANCE_LIMIT) || 1
 
