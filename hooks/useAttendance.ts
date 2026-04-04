@@ -4,12 +4,12 @@ export function useAttendanceToday() {
   return useQuery({
     queryKey: ["attendance", "today"],
     queryFn: async () => {
-      const res = await fetch("/api/attendance/today")
+      const res = await fetch("/api/attendance/today", { cache: "no-store" })
       if (!res.ok) throw new Error("Failed to fetch attendance")
       return res.json()
     },
-    staleTime: 10 * 1000, // Reduced from 30s to 10s
-    refetchInterval: 10 * 1000, // Reduced from 30s to 10s
+    staleTime: 3 * 1000, 
+    refetchInterval: 3 * 1000,
   })
 }
 

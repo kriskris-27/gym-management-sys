@@ -343,6 +343,7 @@ export default function MemberProfilePage() {
     resolver: zodResolver(memberSchema)
   })
   const [editSuccess, setEditSuccess] = useState(false)
+  const [apiEditError, setApiEditError] = useState("")
 
   useEffect(() => {
     if (member && showEditModal) {
@@ -372,6 +373,7 @@ export default function MemberProfilePage() {
   }, [editStartDate, editMembershipType, setEditVal])
 
   const onEditSubmit = async (data: MemberFormData) => {
+    setApiEditError("")
     try {
       const res = await fetch(`/api/members/${id}`, {
         method: "PUT",
@@ -380,23 +382,21 @@ export default function MemberProfilePage() {
       })
       if (res.ok) {
         setEditSuccess(true)
-        // Invalidate ALL related queries to refresh payment summary
         queryClient.invalidateQueries({ queryKey: ["member", id] })
         queryClient.invalidateQueries({ queryKey: ["members"] })
-        queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
-        queryClient.invalidateQueries({ queryKey: ["payments"] })
-        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
-        
-        // Force refetch for immediate update
-        queryClient.refetchQueries({ queryKey: ["payments", "summary", id] })
+        queryClient.refetchQueries({ queryKey: ["member", id] })
         
         setTimeout(() => {
           setShowEditModal(false)
           setEditSuccess(false)
         }, 1000)
+      } else {
+        const err = await res.json()
+        setApiEditError(err.error || "Update failed")
       }
     } catch (e) {
       console.error(e)
+      setApiEditError("Network error. Please try again.")
     }
   }
 
@@ -553,8 +553,8 @@ export default function MemberProfilePage() {
           <span>←</span> Members
         </button>
         <div className="flex gap-2 items-center">
-          {/* RENEW / SWITCH BUTTON - Shows if status is INACTIVE or Subscription is Expired/Cancelled */}
-          {(member?.status === "INACTIVE" || member?.isPaidFull === undefined || isExpired || member?.subscriptionStatus !== "ACTIVE") && (
+          {/* RENEW / SWITCH BUTTON - Always show for non-deleted members to allow STACKING */}
+          {member?.status !== "DELETED" && (
             <button
               onClick={() => {
                 setShowRenewalModal(true)
@@ -562,7 +562,7 @@ export default function MemberProfilePage() {
               }}
               className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] tracking-widest uppercase px-4 py-2.5 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
             >
-              Switch / Renew
+              {member?.status === "ACTIVE" && !isExpired ? "Extend / Switch" : "Switch / Renew"}
             </button>
           )}
           {member?.status === "ACTIVE" && !isExpired && (
@@ -624,7 +624,14 @@ export default function MemberProfilePage() {
         <div className="flex-1 w-full">
           <div className="mb-4">
             <h1 className="text-white text-[24px] font-black leading-tight tracking-tight">{member.name}</h1>
-            <p className="text-[#444444] text-[13px] mt-1 font-medium">{member.phone}</p>
+            <div className="flex items-center gap-3 mt-1">
+              <p className="text-[#444444] text-[13px] font-medium">{member.phone}</p>
+              {member.futurePlansCount > 0 && (
+                <span className="bg-[#10B981]/10 text-[#10B981] text-[10px] px-2 py-0.5 rounded-full border border-[#10B981]/20 font-bold uppercase tracking-wider">
+                  +{member.futurePlansCount} Future {member.futurePlansCount === 1 ? 'Plan' : 'Plans'} Queued
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-6">
@@ -705,7 +712,9 @@ export default function MemberProfilePage() {
             {paymentSummary.totalPaid === 0 ? (
               <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">No payments yet</p>
             ) : (
-              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">{payments.length} payment{payments.length === 1 ? '' : 's'}</p>
+              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">
+                {payments.filter((p: PaymentRecord) => p.amount > 0).length} payment{payments.filter((p: PaymentRecord) => p.amount > 0).length === 1 ? '' : 's'}
+              </p>
             )}
           </div>
           
@@ -860,34 +869,36 @@ export default function MemberProfilePage() {
                 </tr>
               </thead>
               <tbody>
-                {payments.length === 0 ? (
+                {payments.filter((p: PaymentRecord) => p.amount > 0).length === 0 ? (
                   <tr>
                     <td colSpan={4} className="py-12 text-center text-[#333333] text-[13px] font-medium">
                       No payments recorded yet
                     </td>
                   </tr>
                 ) : (
-                  payments.map((pay: PaymentRecord) => {
-                    const modeColor = pay.mode === "CASH" ? "bg-[#10B981]/10 text-[#10B981]" : pay.mode === "UPI" ? "bg-[#3B82F6]/10 text-[#3B82F6]" : "bg-[#8B5CF6]/10 text-[#8B5CF6]"
-                    return (
-                      <tr key={pay.id} className="border-b border-[#0D0D0D] hover:bg-[#0D0D0D] transition-colors">
-                        <td className="px-6 py-4 text-white text-[13px] font-medium whitespace-nowrap">
-                          {formatDate(pay.date)}
-                        </td>
-                        <td className="px-6 py-4 text-white font-bold whitespace-nowrap">
-                          ₹{pay.amount.toLocaleString('en-IN')}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`${modeColor} text-[10px] font-bold px-2.5 py-1 rounded-sm uppercase tracking-wider`}>
-                            {pay.mode}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-[#444444] text-[12px] italic max-w-[200px] truncate">
-                          {pay.notes || "-"}
-                        </td>
-                      </tr>
-                    )
-                  })
+                  payments
+                    .filter((p: PaymentRecord) => p.amount > 0)
+                    .map((pay: PaymentRecord) => {
+                      const modeColor = pay.mode === "CASH" ? "bg-[#10B981]/10 text-[#10B981]" : pay.mode === "UPI" ? "bg-[#3B82F6]/10 text-[#3B82F6]" : "bg-[#8B5CF6]/10 text-[#8B5CF6]"
+                      return (
+                        <tr key={pay.id} className="border-b border-[#0D0D0D] hover:bg-[#0D0D0D] transition-colors">
+                          <td className="px-6 py-4 text-white text-[13px] font-medium whitespace-nowrap">
+                            {formatDate(pay.date)}
+                          </td>
+                          <td className="px-6 py-4 text-white font-bold whitespace-nowrap">
+                            ₹{pay.amount.toLocaleString('en-IN')}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`${modeColor} text-[10px] font-bold px-2.5 py-1 rounded-sm uppercase tracking-wider`}>
+                              {pay.mode}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-[#444444] text-[12px] italic max-w-[200px] truncate">
+                            {pay.notes || "-"}
+                          </td>
+                        </tr>
+                      )
+                    })
                 )}
               </tbody>
             </table>
@@ -1170,6 +1181,11 @@ export default function MemberProfilePage() {
             <h2 className="text-white text-[20px] font-black tracking-tight mb-6">Edit Member</h2>
             
             <form onSubmit={handleEditSubmit(onEditSubmit)} className="space-y-5">
+              {apiEditError && (
+                <div className="bg-[#D11F00]/10 border border-[#D11F00]/20 rounded-lg p-3 text-[#D11F00] text-[12px] font-bold animate-fade">
+                  ⚠ {apiEditError}
+                </div>
+              )}
               <div>
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Full Name</label>
                 <input

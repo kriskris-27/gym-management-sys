@@ -414,7 +414,7 @@ export async function getMemberSubscriptionFinancialSummary(memberId: string): P
   const totalAmount = subSummary._sum.planPriceSnapshot || 0
   const totalPaid = paySummary._sum.finalAmount || 0
   const totalDiscount = paySummary._sum.discountAmount || 0
-  const remaining = Math.max(0, Math.round(totalAmount - (totalPaid + totalDiscount)))
+  const remaining = Math.round(totalAmount - (totalPaid + totalDiscount))
   const isPaidFull = remaining <= 1 // ₹1 tolerance
 
   // 4. Get latest subscription for the name snapshot in the member list

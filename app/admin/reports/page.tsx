@@ -120,6 +120,8 @@ type MonthlyReport = {
   period: { year: number; month: number; label: string }
   revenue: {
     total: number
+    expectedTotal: number
+    gap: number
     byPlan: Record<string, number>
     byMode: { CASH: number; UPI: number; CARD: number }
     dailyBreakdown: { date: string; amount: number; count: number }[]
@@ -420,12 +422,31 @@ export default function AdminReportsPage() {
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-wider text-[#666666]">
-            TOTAL REVENUE
+            CASH COLLECTED
           </p>
           <p className="mt-2 text-[32px] font-black text-white">
             ₹{(data?.revenue.total ?? 0).toLocaleString("en-IN")}
           </p>
-          <p className="mt-1 text-[12px] text-[#444444]">{data?.period.label}</p>
+          <p className="mt-1 text-[12px] text-[#10B981] font-medium">
+            From {data?.revenue.dailyBreakdown.reduce((s, b) => s + b.count, 0)} transactions
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-[#666666]">
+            TOTAL SALES
+          </p>
+          <p className="mt-2 text-[32px] font-black text-[#F59E0B]">
+            ₹{(data?.revenue.expectedTotal ?? 0).toLocaleString("en-IN")}
+          </p>
+          {data?.revenue.gap && data.revenue.gap > 0 ? (
+            <p className="mt-1 text-[12px] text-[#D11F00] font-medium">
+              Gap: ₹{data.revenue.gap.toLocaleString("en-IN")} pending
+            </p>
+          ) : (
+            <p className="mt-1 text-[12px] text-[#10B981] font-medium">
+              All sales collected ✓
+            </p>
+          )}
         </div>
         <div>
           <p className="text-[11px] font-bold uppercase tracking-wider text-[#666666]">

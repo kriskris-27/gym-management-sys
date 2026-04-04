@@ -488,7 +488,7 @@ export default function AttendancePage() {
               {filter !== "All" ? `· ${filter}` : "· today"}
             </span>
             <span className="text-[#2A2A2A] text-[10px]">
-              Auto-refreshes every 30s
+              Auto-refreshes live (every 3s)
             </span>
           </div>
         )}

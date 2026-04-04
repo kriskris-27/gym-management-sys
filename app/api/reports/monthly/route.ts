@@ -47,12 +47,12 @@ export async function GET(request: Request) {
 
   try {
     // 2. FETCH DATA
-    const [payments, sessions, newMembersCount, activeMembersCount, expiredMembersCount] = await Promise.all([
+    const [payments, sessions, newMembersCount, activeMembersCount, expiredMembersCount, monthlySubscriptions] = await Promise.all([
       prisma.payment.findMany({
         where: { createdAt: { gte: startOfMonth, lt: startOfNextMonth }, status: "SUCCESS" },
         include: { 
           member: { select: { createdAt: true } },
-          subscription: { select: { planNameSnapshot: true, plan: { select: { name: true } } } }
+          subscription: { select: { planNameSnapshot: true } }
         }
       }),
       prisma.attendanceSession.findMany({
@@ -64,37 +64,45 @@ export async function GET(request: Request) {
       prisma.member.count({ where: { status: 'ACTIVE' } }),
       prisma.subscription.count({
         where: { endDate: { gte: startOfMonth, lt: startOfNextMonth }, status: 'ACTIVE' }
+      }),
+      prisma.subscription.findMany({
+        where: { startDate: { gte: startOfMonth, lt: startOfNextMonth }, status: { not: "CANCELLED" } }
       })
     ])
 
     // 3. REVENUE PROCESSING
-    const revenue = {
-      total: 0,
-      byPlan: { MONTHLY: 0, QUARTERLY: 0, HALF_YEARLY: 0, ANNUAL: 0, OTHERS: 0 },
-      byMode: { CASH: 0, UPI: 0, CARD: 0 },
-      dailySummary: {} as Record<string, { amount: number; count: number }>
-    }
+    const revenueByPlan = { MONTHLY: 0, QUARTERLY: 0, HALF_YEARLY: 0, ANNUAL: 0, OTHERS: 0 }
+    const revenueByMode = { CASH: 0, UPI: 0, CARD: 0 }
+    const dailyRevenueSummary = {} as Record<string, { amount: number; count: number }>
+    let revenueCollected = 0
 
-    const renewalsThisMonth = payments.filter((p: any) => p.member.createdAt < startOfMonth).length
-
+    // Cash Collections Logic
     payments.forEach((p: any) => {
-      const finalAmount = p.finalAmount || p.baseAmount || 0
-      revenue.total += finalAmount
-      revenue.byMode[p.method as keyof typeof revenue.byMode] += finalAmount
-      
-      const planBaseName = p.subscription?.plan?.name || "OTHERS"
+      const amt = p.finalAmount || 0
+      if (amt <= 0) return
+      revenueCollected += amt
+      revenueByMode[p.method as keyof typeof revenueByMode] += amt
+      const planName = p.subscription?.planNameSnapshot || "OTHERS"
       let category = "OTHERS"
-      if (["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"].includes(planBaseName)) {
-        category = planBaseName
+      if (["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"].includes(planName)) {
+        category = planName
       }
-      revenue.byPlan[category as keyof typeof revenue.byPlan] += finalAmount
+      revenueByPlan[category as keyof typeof revenueByPlan] += amt
       
-      const dateKey = p.createdAt.toISOString().split('T')[0]
-      if (!revenue.dailySummary[dateKey]) {
-        revenue.dailySummary[dateKey] = { amount: 0, count: 0 }
-      }
-      revenue.dailySummary[dateKey].amount += finalAmount
-      revenue.dailySummary[dateKey].count += 1
+      const istDate = new Date(p.createdAt.getTime() + istOffset)
+      const dateKey = istDate.toISOString().split('T')[0]
+      if (!dailyRevenueSummary[dateKey]) dailyRevenueSummary[dateKey] = { amount: 0, count: 0 }
+      dailyRevenueSummary[dateKey].amount += amt
+      dailyRevenueSummary[dateKey].count += 1
+    })
+
+    // Sales Revenue (Accrual) Logic
+    const expectedRevenueTotal = monthlySubscriptions.reduce((sum, s) => sum + (s.planPriceSnapshot || 0), 0)
+
+    // Improved Renewal Logic: Unique members who paid this month and existed before
+    const membersWhoPaid = new Set(payments.filter(p => p.finalAmount > 0).map(p => p.memberId))
+    const existingMembersCount = await prisma.member.count({
+      where: { id: { in: Array.from(membersWhoPaid) }, createdAt: { lt: startOfMonth } }
     })
 
     // 4. TRAFFIC PROCESSING
@@ -108,15 +116,12 @@ export async function GET(request: Request) {
     }
 
     sessions.forEach((a: any) => {
-      const dateKey = a.checkIn.toISOString().split('T')[0]
-      if (!traffic.dailySummary[dateKey]) {
-        traffic.dailySummary[dateKey] = { count: 0, totalDuration: 0, durationCount: 0 }
-      }
+      const istDate = new Date(a.checkIn.getTime() + istOffset)
+      const dateKey = istDate.toISOString().split('T')[0]
+      if (!traffic.dailySummary[dateKey]) traffic.dailySummary[dateKey] = { count: 0, totalDuration: 0, durationCount: 0 }
       traffic.dailySummary[dateKey].count += 1
-
-      const istHour = new Date(a.checkIn.getTime() + istOffset).getUTCHours()
+      const istHour = istDate.getUTCHours()
       traffic.hourHeatmap[istHour] = (traffic.hourHeatmap[istHour] || 0) + 1
-
       if (a.checkIn && a.checkOut) {
         const duration = Math.round((a.checkOut.getTime() - a.checkIn.getTime()) / (1000 * 60))
         if (duration > 0) {
@@ -135,16 +140,18 @@ export async function GET(request: Request) {
     return NextResponse.json({
       period: { year, month, label: reportLabel },
       revenue: {
-        total: revenue.total,
-        byPlan: revenue.byPlan,
-        byMode: revenue.byMode,
-        dailyBreakdown: Object.entries(revenue.dailySummary).map(([date, stats]: [string, { amount: number; count: number }]) => ({ date, ...stats }))
+        total: revenueCollected,
+        expectedTotal: expectedRevenueTotal, // Total plan value sold this month
+        gap: Math.max(0, expectedRevenueTotal - revenueCollected), // What's still pending
+        byPlan: revenueByPlan,
+        byMode: revenueByMode,
+        dailyBreakdown: Object.entries(dailyRevenueSummary).map(([date, stats]) => ({ date, ...stats }))
       },
       members: {
         newThisMonth: newMembersCount,
         activeTotal: activeMembersCount,
         expiredThisMonth: expiredMembersCount,
-        renewalsThisMonth
+        renewalsThisMonth: existingMembersCount
       },
       attendance: {
         totalSessions: traffic.totalSessions,
@@ -158,8 +165,6 @@ export async function GET(request: Request) {
         peakHour,
         hourHeatmap: Array.from({ length: 24 }, (_, h) => traffic.hourHeatmap[h] ?? 0)
       }
-    }, {
-      headers: { "Cache-Control": "s-maxage=300, stale-while-revalidate" }
     })
 
   } catch (error) {

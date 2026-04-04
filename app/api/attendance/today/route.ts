@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
-import { getUTCDateRange, calcDuration, formatDuration, nowUTC } from "@/lib/utils"
+import { getUTCDateRange, calcDuration, formatDuration, nowUTC, fromDate } from "@/lib/utils"
 import { batchCleanupStaleSessions } from "@/domain/attendance"
 
 /**
@@ -70,7 +70,7 @@ export async function GET() {
       // Calculate duration for ongoing sessions
       let duration: number | null = null
       if (isOngoing) {
-        duration = calcDuration(record.checkIn, now)
+        duration = calcDuration(fromDate(record.checkIn), nowUTC())
       }
 
       return {
@@ -90,7 +90,7 @@ export async function GET() {
 
     return NextResponse.json(
       {
-        date: todayUTC.toISOString().split('T')[0], // Server date string
+        date: todayUTC.toISODate(), // Server date string
         totalPresent,
         currentlyInside,
         records: formattedRecords,
@@ -98,7 +98,7 @@ export async function GET() {
       },
       {
         headers: {
-          "Cache-Control": "s-maxage=30, stale-while-revalidate",
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
         },
       }
     )

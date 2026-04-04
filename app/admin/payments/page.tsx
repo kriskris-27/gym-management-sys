@@ -100,6 +100,9 @@ export default function PaymentsPage() {
   // ─── Client-side filtering ────────────────────────────────────────────────
 
   const filtered = payments.filter((p) => {
+    // Hide zero-amount payments from the global ledger
+    if (p.amount <= 0) return false
+
     const matchesSearch = p.memberName.toLowerCase().includes(search.toLowerCase())
     const matchesMode = modeFilter === "All" ? true : p.mode === modeFilter.toUpperCase()
     const payDate = new Date(p.date.split("T")[0])
@@ -113,12 +116,14 @@ export default function PaymentsPage() {
 
   const now = new Date()
   const thisMonthPayments = payments.filter((p) => {
+    if (p.amount <= 0) return false // Hide zeros
     const d = new Date(p.date.split("T")[0])
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
   })
   const thisMonthTotal = thisMonthPayments.reduce((s, p) => s + p.amount, 0)
   const thisMonthCount = thisMonthPayments.length
 
+  const validPaymentsCount = payments.filter(p => p.amount > 0).length
   const allTimeTotal = payments.reduce((s, p) => s + p.amount, 0)
   const cashTotal = payments.filter((p) => p.mode === "CASH").reduce((s, p) => s + p.amount, 0)
   const upiTotal = payments.filter((p) => p.mode === "UPI").reduce((s, p) => s + p.amount, 0)
@@ -325,7 +330,7 @@ export default function PaymentsPage() {
               ₹{allTimeTotal.toLocaleString("en-IN")}
             </p>
           )}
-          <p className="text-[#333333] text-[11px] mt-2">{loading ? "—" : `${payments.length} total transactions`}</p>
+          <p className="text-[#333333] text-[11px] mt-2">{loading ? "—" : `${validPaymentsCount} total transactions`}</p>
         </div>
       </div>
 

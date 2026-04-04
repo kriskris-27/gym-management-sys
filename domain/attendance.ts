@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma"
-import { getISTDateRange, calcDuration, formatDuration } from "../lib/utils"
+import { getISTDateRange, calcDuration, formatDuration, fromDate, nowUTC } from "../lib/utils"
+import { DateTime } from "luxon"
 
 // Type for Prisma transaction - inferred from prisma instance
 type PrismaTransaction = Parameters<typeof prisma.$transaction>[0] extends (tx: infer T) => any ? T : never
@@ -59,9 +60,11 @@ const CLEANUP_LIMIT_PER_MEMBER = 1 // Only cleanup this member's sessions
  */
 export async function scanMember(
   phone: string,
-  now: Date = new Date()
+  nowJS: Date = new Date()
 ): Promise<ScanResult> {
-  console.log(`[Attendance Domain] Scanning member with phone: ${phone}`)
+  const now = fromDate(nowJS)
+  console.log(`[Attendance Domain] Scanning member with phone: ${phone} at ${now.toISO()}`)
+
   
   return await prisma.$transaction(async (tx: PrismaTransaction): Promise<ScanResult> => {
     // Step 1: Get member with status check
@@ -80,20 +83,34 @@ export async function scanMember(
       return {
         state: "INACTIVE" as const,
         memberName: member.name,
-        message: "Your membership has expired. Please renew to continue."
+        message: "Your membership has been deactivated. Please contact the front desk."
       }
     }
 
+    // Step 1.5: PRODUCTION GUARD: Check for valid active subscription
+    // Even if member status is ACTIVE, they must have a non-expired plan
+    const { getActiveSubscription } = await import("./subscription")
+    const activeSub = await getActiveSubscription(member.id)
+    
+    if (!activeSub) {
+      return {
+        state: "INACTIVE" as const,
+        memberName: member.name,
+        message: "No active plan found. Please renew your membership to enter."
+      }
+    }
+
+
     // Step 2: Rate limit guard (domain behavioral guard)
     // FIX: Check for potential check-out BEFORE applying rate limit
-    const lastCheckinAt = member.lastCheckinAt
+    const lastCheckinAt = member.lastCheckinAt ? fromDate(member.lastCheckinAt) : null
     
-    if (lastCheckinAt && (now.getTime() - lastCheckinAt.getTime()) < MIN_SCAN_INTERVAL_SECONDS * 1000) {
+    if (lastCheckinAt && now.diff(lastCheckinAt, 'seconds').seconds < MIN_SCAN_INTERVAL_SECONDS) {
       // Check if there's an open session that might need check-out
       const existingSession = await tx.attendanceSession.findFirst({
         where: { 
           memberId: member.id,
-          sessionDay: getISTDateRange().startOfTodayIST,
+          sessionDay: getISTDateRange().startOfTodayIST.toJSDate(),
           checkOut: null // Only open sessions
         },
         orderBy: { checkIn: 'desc' }
@@ -101,12 +118,12 @@ export async function scanMember(
       
       // If there's an open session, check if it's been long enough for check-out
       if (existingSession) {
-        const sessionDuration = calcDuration(existingSession.checkIn, now)
+        const sessionDuration = calcDuration(fromDate(existingSession.checkIn), now)
         if (sessionDuration >= MIN_SESSION_MINUTES) {
           // Duration met - update lastCheckinAt to now for proper rate limiting
           await tx.member.update({
             where: { id: member.id },
-            data: { lastCheckinAt: now }
+            data: { lastCheckinAt: now.toJSDate() }
           })
           // Continue to session logic (don't return here)
           console.log(`[Attendance Domain] Rate limit bypassed - valid check-out attempt for member: ${member.id}`)
@@ -130,6 +147,7 @@ export async function scanMember(
       }
     }
 
+
     // Step 3: Get IST date range and today's session
     const { startOfTodayIST } = getISTDateRange()
     
@@ -137,20 +155,20 @@ export async function scanMember(
     let todaySession = await tx.attendanceSession.findFirst({
       where: { 
         memberId: member.id,
-        sessionDay: startOfTodayIST
+        sessionDay: startOfTodayIST.toJSDate()
       },
       orderBy: { checkIn: 'desc' } // Use checkIn field
     })
 
-    // Step 5: Deterministic state machine - NO CLEANUP BEFORE LOGIC
+    // Step 5: Deterministic state machine
     if (!todaySession) {
       // No session today - create new one
       try {
         const newSession = await tx.attendanceSession.create({
           data: { 
             memberId: member.id, 
-            sessionDay: startOfTodayIST, // IST date as source of truth
-            checkIn: now, // Use checkIn field from schema
+            sessionDay: startOfTodayIST.toJSDate(), 
+            checkIn: now.toJSDate(), 
             status: 'OPEN',
             source: 'KIOSK'
           }
@@ -159,24 +177,23 @@ export async function scanMember(
         // Update member's last check-in time
         await tx.member.update({
           where: { id: member.id },
-          data: { lastCheckinAt: now }
+          data: { lastCheckinAt: now.toJSDate() }
         })
         
         return {
           state: "CHECKED_IN" as const,
           memberName: member.name,
           message: `Welcome, ${member.name}! ✅`,
-          checkInAt: newSession.checkIn.toISOString(), // Map checkIn to checkInAt for API
+          checkInAt: newSession.checkIn.toISOString(),
           sessionId: newSession.id
         }
-      } catch (error: unknown) {
+      } catch (error: any) {
         // Unique constraint hit - session already exists
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
-          // Fetch existing session and continue with normal flow
+        if (error?.code === 'P2002') {
           todaySession = await tx.attendanceSession.findFirst({
             where: { 
               memberId: member.id,
-              sessionDay: startOfTodayIST
+              sessionDay: startOfTodayIST.toJSDate()
             }
           })
         } else {
@@ -184,6 +201,7 @@ export async function scanMember(
         }
       }
     }
+
 
     // If still no session after handling constraint, something is wrong
     if (!todaySession) {
@@ -193,21 +211,21 @@ export async function scanMember(
     // Step 6: Handle existing session
     if (todaySession.checkOut) {
       // Already completed today - calculate duration on the fly
-      const duration = calcDuration(todaySession.checkIn, todaySession.checkOut)
+      const duration = calcDuration(fromDate(todaySession.checkIn), fromDate(todaySession.checkOut))
       return {
         state: "ALREADY_DONE",
         memberName: member.name,
         message: `Already completed today's session, ${member.name}!`,
-        checkInAt: todaySession.checkIn.toISOString(), // Map checkIn to checkInAt
-        checkOutAt: todaySession.checkOut.toISOString(), // Map checkOut to checkOutAt
-        durationMinutes: duration,
+        checkInAt: todaySession.checkIn.toISOString(), 
+        checkOutAt: todaySession.checkOut.toISOString(), 
+        durationMinutes: Math.round(duration),
         durationFormatted: formatDuration(duration),
         sessionId: todaySession.id
       }
     }
 
     // Step 7: Open session - check duration
-    const gap = calcDuration(todaySession.checkIn, now) // Use checkIn field
+    const gap = calcDuration(fromDate(todaySession.checkIn), now) 
     
     if (gap < MIN_SESSION_MINUTES) {
       // Too soon - still checked in
@@ -215,21 +233,19 @@ export async function scanMember(
         state: "CHECKED_IN",
         memberName: member.name,
         message: `You're already checked in, ${member.name}! 👋`,
-        checkInAt: todaySession.checkIn.toISOString(), // Use checkIn field
+        checkInAt: todaySession.checkIn.toISOString(), 
         sessionId: todaySession.id
       }
     }
 
-    // Step 8: Valid duration - check out normally (THIS IS THE KEY FIX)
+    // Step 8: Valid duration - check out normally
     await tx.attendanceSession.update({
       where: { id: todaySession.id },
       data: { 
-        checkOut: now, // Use checkOut field - ACTUAL check-out time
-        status: 'CLOSED' as any // Use valid SessionStatus enum value
+        checkOut: now.toJSDate(), 
+        status: 'CLOSED'
       }
     })
-    
-    // Note: lastCheckinAt already updated in rate limit section if bypassed
     
     // Step 9: Cleanup OLD sessions AFTER current session is handled
     await cleanupOldSessionsInTransaction(member.id, now, tx)
@@ -238,12 +254,13 @@ export async function scanMember(
       state: "CHECKED_OUT",
       memberName: member.name,
       message: `Goodbye, ${member.name}! You stayed for ${formatDuration(gap)} 💪`,
-      checkInAt: todaySession.checkIn.toISOString(), // Use checkIn field
-      checkOutAt: now.toISOString(),
-      durationMinutes: gap,
+      checkInAt: todaySession.checkIn.toISOString(), 
+      checkOutAt: now.toISO() || now.toString(),
+      durationMinutes: Math.round(gap),
       durationFormatted: formatDuration(gap),
       sessionId: todaySession.id
     }
+
   })
 }
 
@@ -253,58 +270,37 @@ export async function scanMember(
  */
 export async function cleanupOldSessionsInTransaction(
   memberId: string,
-  now: Date,
+  now: DateTime,
   tx: PrismaTransaction
 ): Promise<number> {
-  console.log(`[Attendance Domain] Cleaning up OLD sessions for member: ${memberId}`)
-  
   const { startOfTodayIST } = getISTDateRange()
   
-  // Find ONLY previous day open sessions for this member
   const oldOpenSessions = await tx.attendanceSession.findMany({
     where: {
       memberId,
-      checkOut: null, // Use checkOut field
+      checkOut: null,
       sessionDay: {
-        lt: startOfTodayIST // ONLY previous days, NOT today
+        lt: startOfTodayIST.toJSDate()
       }
     },
     take: CLEANUP_LIMIT_PER_MEMBER,
-    orderBy: { checkIn: 'asc' } // Use checkIn field
+    orderBy: { checkIn: 'asc' }
   })
 
-  const updates = []
-
   for (const session of oldOpenSessions) {
-    // Only close previous day sessions with proper check-out time
-    updates.push({
-      id: session.id,
-      checkOut: session.checkIn, // Use checkOut field (same day is fine for old sessions)
-      durationMinutes: 0,
-      autoClosed: true,
-      closeReason: 'PREVIOUS_DAY' as AutoCloseReason // Use closeReason field
+    await tx.attendanceSession.update({
+      where: { id: session.id },
+      data: {
+        checkOut: session.checkIn,
+        autoClosed: true,
+        closeReason: 'PREVIOUS_DAY'
+      }
     })
   }
 
-  // Apply updates if any
-  if (updates.length > 0) {
-    await Promise.all(
-      updates.map(update =>
-        tx.attendanceSession.update({
-          where: { id: update.id },
-          data: {
-            checkOut: update.checkOut, // Use checkOut field
-            autoClosed: update.autoClosed,
-            closeReason: update.closeReason // Use closeReason field
-          }
-        })
-      )
-    )
-  }
-
-  console.log(`[Attendance Domain] Cleaned up ${updates.length} sessions for member: ${memberId}`)
-  return updates.length
+  return oldOpenSessions.length
 }
+
 
 /**
  * Validate session with complete invariants
@@ -334,12 +330,13 @@ export function validateSession(
 
   // Rule 2: Check-out time validation
   if (checkOut) {
-    if (checkOut < checkIn) {
+    if (checkOut.getTime() < checkIn.getTime()) {
       errors.push("Check-out time cannot be before check-in time")
     }
-    if (checkOut > now) {
+    if (checkOut.getTime() > now.getTime()) {
       errors.push("Check-out time cannot be in future")
     }
+
 
     // FIX: Check-out must be same day (IST)
     // Note: getISTDateRange() doesn't accept parameters, so we use current time
@@ -352,7 +349,7 @@ export function validateSession(
 
   // Rule 3: Duration validation
   if (checkOut) {
-    const duration = calcDuration(checkIn, checkOut)
+    const duration = calcDuration(fromDate(checkIn), fromDate(checkOut))
     
     if (duration < MIN_SESSION_MINUTES) {
       warnings.push(`Session duration ${duration}min is less than minimum ${MIN_SESSION_MINUTES}min`)
@@ -364,7 +361,7 @@ export function validateSession(
 
   // Determine allowed actions
   if (!checkOut) {
-    const durationSinceCheckIn = calcDuration(checkIn, now)
+    const durationSinceCheckIn = calcDuration(fromDate(checkIn), fromDate(now))
     canCheckIn = false // Already checked in
     canCheckOut = durationSinceCheckIn >= MIN_SESSION_MINUTES
   } else {
@@ -491,7 +488,7 @@ export async function getAttendanceStats(
   // Calculate statistics
   const totalSessions = filteredValidSessions.length
   const totalMinutes = filteredValidSessions.reduce((sum: number, session: AttendanceSession) => {
-    const duration = session.checkOut ? calcDuration(session.checkIn, session.checkOut) : 0
+    const duration = session.checkOut ? calcDuration(fromDate(session.checkIn), fromDate(session.checkOut)) : 0
     return sum + duration
   }, 0)
   const avgMinutes = totalSessions > 0 ? Math.round(totalMinutes / totalSessions) : 0
@@ -507,75 +504,51 @@ export async function getAttendanceStats(
   }
 }
 
-/**
- * Batch cleanup of stale sessions (serverless-friendly)
- * FIX: Proper duration clamping, sessionDay usage
- */
-export async function batchCleanupStaleSessions(now: Date = new Date()): Promise<number> {
-  console.log(`[Attendance Domain] Batch cleanup of stale sessions`)
-  
+export async function batchCleanupStaleSessions(nowJS: Date = new Date()): Promise<number> {
+  const now = fromDate(nowJS)
   const { startOfTodayIST } = getISTDateRange()
   const CLEANUP_BATCH_SIZE = 20
   
-  // Find limited batch of sessions needing cleanup
   const sessionsToClean = await prisma.attendanceSession.findMany({
     where: {
-      checkOut: null, // Use checkOut field
+      checkOut: null,
       OR: [
-        // Previous day sessions (using sessionDay)
-        { sessionDay: { lt: startOfTodayIST } },
-        // Sessions that would exceed max duration (check in code)
+        { sessionDay: { lt: startOfTodayIST.toJSDate() } },
       ]
     },
     take: CLEANUP_BATCH_SIZE,
-    orderBy: { checkIn: 'asc' } // Use checkIn field
+    orderBy: { checkIn: 'asc' }
   })
 
-  const updates = []
-
+  let count = 0
   for (const session of sessionsToClean) {
-    // Previous day rule
-    if (session.sessionDay < startOfTodayIST) {
-      updates.push({
-        id: session.id,
-        checkOut: session.checkIn, // Use checkOut field
-        durationMinutes: 0,
-        autoClosed: true,
-        closeReason: 'PREVIOUS_DAY' as AutoCloseReason // Use closeReason field
+    const sessionDay = fromDate(session.sessionDay)
+    if (sessionDay < startOfTodayIST) {
+      await prisma.attendanceSession.update({
+        where: { id: session.id },
+        data: {
+          checkOut: session.checkIn,
+          autoClosed: true,
+          closeReason: 'PREVIOUS_DAY'
+        }
       })
+      count++
       continue
     }
 
-    // Max duration rule
-    const duration = calcDuration(session.checkIn, now) // Use checkIn field
+    const duration = calcDuration(fromDate(session.checkIn), now)
     if (duration > MAX_DURATION_MINUTES) {
-      // FIX: Always clamp duration
-      updates.push({
-        id: session.id,
-        checkOut: now, // Use checkOut field
-        durationMinutes: Math.min(duration, MAX_DURATION_MINUTES),
-        autoClosed: true,
-        closeReason: 'MAX_DURATION' as AutoCloseReason // Use closeReason field
+      await prisma.attendanceSession.update({
+        where: { id: session.id },
+        data: {
+          checkOut: now.toJSDate(),
+          autoClosed: true,
+          closeReason: 'MAX_DURATION'
+        }
       })
+      count++
     }
   }
 
-  // Apply updates
-  if (updates.length > 0) {
-    await Promise.all(
-      updates.map(update => 
-        prisma.attendanceSession.update({
-          where: { id: update.id },
-          data: {
-            checkOut: update.checkOut, // Use checkOut field
-            autoClosed: update.autoClosed,
-            closeReason: update.closeReason // Use closeReason field
-          }
-        })
-      )
-    )
-  }
-
-  console.log(`[Attendance Domain] Batch cleanup completed: ${updates.length} sessions`)
-  return updates.length
+  return count
 }

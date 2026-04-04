@@ -169,7 +169,7 @@ export async function POST(request: Request) {
             subscriptionId: subscription.id,
             baseAmount: resolvedBasePrice,
             discountAmount: discount,
-            finalAmount: data.paidAmount ?? finalPrice,
+            finalAmount: data.paidAmount ?? 0, // Default to 0 for new members unless specified
             method: (data.paymentMode as any) || "CASH", 
             status: "SUCCESS",
             purpose: "SUBSCRIPTION"

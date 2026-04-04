@@ -113,7 +113,7 @@ export async function computeMultipleMembersFinancials(memberIds: string[]): Pro
   // Final Pass to compute remaining/paid-full logic consistently
   financialsMap.forEach((data) => {
     const disc = (data as any).totalDiscount || 0
-    data.remaining = Math.max(0, Math.round(data.totalAmount - (data.totalPaid + disc)))
+    data.remaining = Math.round(data.totalAmount - (data.totalPaid + disc))
     data.isPaidFull = data.remaining <= 1 // ₹1 tolerance consistent with domain
   })
 
