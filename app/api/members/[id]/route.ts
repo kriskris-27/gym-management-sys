@@ -37,12 +37,19 @@ export async function GET(
     }
 
     const { _count, sessions, subscriptions, ...memberData } = member
-    const latestSubscription = subscriptions[0] || null
+    const latestSubscription = subscriptions[0] && subscriptions[0].status !== "CANCELLED" 
+      ? subscriptions[0] 
+      : null
+
+    const { computeMemberFinancials } = await import("@/lib/financial-service")
+    const financials = await computeMemberFinancials(id)
 
     return NextResponse.json({
       member: {
         ...memberData,
+        ...financials,
         membershipType: latestSubscription?.planNameSnapshot || "NONE",
+        subscriptionStatus: latestSubscription?.status || "INACTIVE",
         startDate: latestSubscription?.startDate || null,
         endDate: latestSubscription?.endDate || null,
         attendanceCount: _count.sessions,
@@ -126,8 +133,12 @@ export async function PUT(
 
           if (updateData.membershipType && updateData.membershipType !== latestSub.planNameSnapshot) {
             if (updateData.membershipType === "OTHERS") {
-              const othersPlan = await tx.plan.findUnique({ where: { name: "OTHERS" } })
-              if (!othersPlan) throw new Error("OTHERS plan not found in database. Configure pricing first.")
+              let othersPlan = await tx.plan.findUnique({ where: { name: "OTHERS" } })
+              if (!othersPlan) {
+                othersPlan = await tx.plan.create({
+                  data: { name: "OTHERS", price: 0, durationDays: 1, isActive: true }
+                })
+              }
               planId = othersPlan.id
               planName = updateData.manualPlanName || "Others"
               finalPrice = updateData.manualAmount || latestSub.planPriceSnapshot || 0
@@ -147,16 +158,31 @@ export async function PUT(
             if (updateData.manualAmount !== undefined) finalPrice = updateData.manualAmount
           }
 
+          // CHECK: Can we update the snapshot price? 
+          // If a payment already exists, the price is IMMUTABLE to preserve history.
+          const paymentsCount = await tx.payment.count({
+            where: { subscriptionId: latestSub.id, status: 'SUCCESS' }
+          })
+
+          const isPriceChanging = finalPrice !== latestSub.planPriceSnapshot
+          
           await tx.subscription.update({
             where: { id: latestSub.id },
             data: {
               planId,
               planNameSnapshot: planName,
-              planPriceSnapshot: finalPrice, 
+              // Only update if no payments exist OR it's the same price (no change)
+              planPriceSnapshot: (!isPriceChanging || paymentsCount === 0) 
+                 ? finalPrice 
+                 : latestSub.planPriceSnapshot, 
               startDate: updateData.startDate,
               endDate: updateData.endDate
             }
           })
+
+          if (isPriceChanging && paymentsCount > 0) {
+             console.warn(`[API] Member PUT: Blocked price change for sub ${latestSub.id} because payments exist.`)
+          }
         }
       }
 
@@ -265,24 +291,86 @@ export async function PATCH(
       const validated = RenewMemberSchema.safeParse(body)
       if (!validated.success) return NextResponse.json({ error: validated.error.issues[0].message }, { status: 400 })
 
+      // 1. CHECK FOR OUTSTANDING BALANCE (Debt Block)
+      const { computeMemberFinancials } = await import("@/lib/financial-service")
+      const financials = await computeMemberFinancials(id)
+      const balance = financials.remaining
+
+      if (balance > 1) { // 1 rupee tolerance for float rounding
+        return NextResponse.json({ 
+          error: `Cannot renew: Member has an outstanding balance of ₹${balance}. Please clear previous dues first.` 
+        }, { status: 403 })
+      }
+
       const { membershipType, startDate, endDate, customPrice, manualPlanName } = validated.data
       
       const res = await prisma.$transaction(async (tx) => {
-        // 1. Get Plan
-        const planName = membershipType || member.subscriptions[0]?.planNameSnapshot || "MONTHLY"
-        const plan = await tx.plan.findUnique({ where: { name: (membershipType === "OTHERS" || planName === "OTHERS") ? "OTHERS" : planName } })
-        
-        if (!plan) throw new Error(`Plan ${planName} not found. Configuration error.`)
+        // 1. PRODUCTION HARDENING: Auto-close existing ACTIVE subscriptions
+        // This prevents "Double-Active" edge cases if buttons are double-clicked
+        await tx.subscription.updateMany({
+          where: { 
+            memberId: id,
+            status: "ACTIVE"
+          },
+          data: { status: "EXPIRED" }
+        })
 
-        // 2. Resolve Plan details
+        // 2. Get Plan
+
+        const latestSub = member.subscriptions[0]
+        const planName = membershipType || latestSub?.planNameSnapshot || "MONTHLY"
+        const planLookup = (membershipType === "OTHERS" || planName === "OTHERS") ? "OTHERS" : planName
+        let plan = await tx.plan.findUnique({ where: { name: planLookup } })
+        
+        // Auto-bootstrap OTHERS if missing to prevent "Plan not found" errors
+        if (!plan && planLookup === "OTHERS") {
+          plan = await tx.plan.create({
+            data: { name: "OTHERS", price: 0, durationDays: 1, isActive: true }
+          })
+        }
+
+        if (!plan) throw new Error(`Plan error: '${planLookup}' not found. Configuration error.`)
+
+        // 3. Anniversary/Admission Date Logic (The 25-Day Rule)
+        const now = new Date()
+        const istOffset = 5.5 * 60 * 60 * 1000
+        const nowIST = new Date(now.getTime() + istOffset)
+        
+        // Default to provided startDate or Today
+        let resolvedStartDate = startDate ? new Date(startDate) : nowIST
+
+        // Apply 25-day cycle preservation and extension logic
+        // ONLY if the latest subscription was valid (not cancelled)
+        if (latestSub && latestSub.status !== "CANCELLED" && latestSub.endDate) {
+          const expiryDate = new Date(latestSub.endDate)
+          const gapMs = nowIST.getTime() - expiryDate.getTime()
+          const gapDays = gapMs / (1000 * 60 * 60 * 24)
+
+          // CASE A: Member is renewing EARLY (still active)
+          // We start the next subscription exactly where the old one ends.
+          if (gapDays <= 0) {
+            resolvedStartDate = expiryDate
+            console.log(`[Renewal] Extending active subscription. Start: ${expiryDate.toISOString()}`)
+          }
+          // CASE B: Member is late but within the 25-day grace period
+          // We backdate to preserve their anniversary/admission day.
+          else if (gapDays <= 25) {
+            resolvedStartDate = expiryDate
+            console.log(`[Renewal] Backdating late renewal (Gap: ${Math.ceil(gapDays)} days)`)
+          }
+          // CASE C: Member is over 25 days late
+          // They start fresh from 'Today' (which is the default nowIST).
+          else {
+            console.log(`[Renewal] Fresh start for very late renewal (Gap: ${Math.ceil(gapDays)} days)`)
+          }
+        }
+
         let resolvedPlanName = plan.name
         let resolvedBasePrice = customPrice !== undefined ? customPrice : plan.price
-        let resolvedStartDate = startDate ? new Date(startDate) : new Date()
         let resolvedEndDate = endDate ? new Date(endDate) : null
 
         if (membershipType === "OTHERS") {
           resolvedPlanName = manualPlanName || "Others"
-          // customPrice is used as base price for Others
         }
 
         if (!resolvedEndDate) {
@@ -290,7 +378,7 @@ export async function PATCH(
           resolvedEndDate.setDate(resolvedEndDate.getDate() + (plan.durationDays || 30))
         }
 
-        // 3. Create Subscription
+        // 4. Create Subscription
         const subscription = await tx.subscription.create({
           data: {
             memberId: id,
@@ -303,15 +391,15 @@ export async function PATCH(
           }
         })
 
-        // 4. Create Payment (Auto-success for renewal for now)
+        // 5. Create Payment (Installment Support)
         await tx.payment.create({
           data: {
             memberId: id,
             subscriptionId: subscription.id,
             baseAmount: resolvedBasePrice,
             discountAmount: 0,
-            finalAmount: resolvedBasePrice,
-            method: "CASH",
+            finalAmount: validated.data.paidAmount ?? 0, // Default to 0 instead of auto-paying full price
+            method: (validated.data.paymentMode as any) || "CASH",
             status: "SUCCESS",
             purpose: "SUBSCRIPTION"
           }
@@ -342,6 +430,37 @@ export async function PATCH(
       })
 
       return NextResponse.json({ success: true, member: res })
+    }
+
+    // CASE 3: Cancel Active Subscription (To allow Plan Switching)
+    if (body.action === "cancel") {
+      const activeSub = member.subscriptions[0]
+      if (!activeSub || activeSub.status !== "ACTIVE") {
+        return NextResponse.json({ error: "No active subscription to cancel" }, { status: 400 })
+      }
+
+      const cancelled = await prisma.subscription.update({
+        where: { id: activeSub.id },
+        data: { status: "CANCELLED" }
+      })
+
+      // Update Member Status to INACTIVE (Triggers Renewal Banner)
+      await prisma.member.update({
+        where: { id },
+        data: { status: "INACTIVE" }
+      })
+
+      // Audit Log
+      await prisma.auditLog.create({
+        data: {
+          entityType: "MEMBER",
+          entityId: id,
+          action: "CANCELLED",
+          before: { plan: activeSub.planNameSnapshot, id: activeSub.id }
+        }
+      })
+
+      return NextResponse.json({ success: true, message: "Subscription cancelled successfully" })
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 })

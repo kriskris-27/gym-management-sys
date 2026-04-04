@@ -15,18 +15,18 @@ export async function GET(
       return NextResponse.json({ error: "Invalid member ID" }, { status: 400 })
     }
 
-    // Get member info for response
+    // Get member info (only fields that exist)
     const member = await prisma.member.findUnique({
       where: { id: memberId },
       select: {
         id: true,
         name: true,
         phone: true,
-        membershipType: true,
-        startDate: true,
-        endDate: true,
         status: true,
-        lastRenewalAt: true
+        subscriptions: {
+          orderBy: { createdAt: "desc" },
+          take: 1
+        }
       }
     })
 
@@ -34,6 +34,8 @@ export async function GET(
       console.log(`[Payment Summary API] Member not found or deleted: ${memberId}`)
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
+
+    const latestSub = member.subscriptions[0]
 
     console.log(`[Payment Summary API] Found member: ${member.name}, calling financial service`)
 
@@ -45,10 +47,10 @@ export async function GET(
     const response = {
       ...financials,
       memberName: member.name,
-      plan: member.membershipType,
-      // Provide clean strings for frontend presentation (YYYY-MM-DD format commonly used)
-      startDate: member.startDate.toISOString().split("T")[0],
-      endDate: member.endDate?.toISOString().split("T")[0]
+      plan: latestSub?.planNameSnapshot || "N/A",
+      // Provide clean strings for frontend presentation
+      startDate: latestSub?.startDate?.toISOString().split("T")[0] || null,
+      endDate: latestSub?.endDate?.toISOString().split("T")[0] || null
     }
 
     console.log(`[Payment Summary API] Response:`, response)

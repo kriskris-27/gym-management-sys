@@ -9,17 +9,16 @@ interface Member {
   id: string
   name: string
   phone: string
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
-  startDate: string
-  endDate: string
   status: "ACTIVE" | "INACTIVE" | "DELETED"
   isPaidFull: boolean
   totalAmount: number
   totalPaid: number
   remaining: number
   subscriptions?: Array<{
+    startDate: string
     endDate: string
     status: string
+    planNameSnapshot: string
     planPriceSnapshot?: number
   }>
 }
@@ -38,22 +37,22 @@ export default function MembersPage() {
     "Inactive": "INACTIVE",
     "Deleted": "DELETED"
   }
-  
+
   const { data: rawData, isLoading: loading } = useMembers(undefined, statusMap[statusFilter])
   const members: Member[] = rawData?.members ?? []
 
 
   const now = new Date()
-  
+
   // Date Helpers
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "-";
     const datePart = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr.split(" ")[0];
     const [year, month, day] = datePart.split("-");
-    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`;
   }
-  
+
   const getDaysDiff = (endDateStr: string) => {
     const end = new Date(endDateStr)
     const diff = end.getTime() - now.getTime()
@@ -72,15 +71,18 @@ export default function MembersPage() {
   }
 
   const planMap: Record<string, string> = {
-    "Monthly":     "MONTHLY",
-    "Quarterly":   "QUARTERLY",
+    "Monthly": "MONTHLY",
+    "Quarterly": "QUARTERLY",
     "Half-Yearly": "HALF_YEARLY",
-    "Annual":      "ANNUAL",
-    "Others":      "OTHERS",
+    "Annual": "ANNUAL",
+    "Others": "OTHERS",
   }
 
   const planCounts = members.reduce((acc, m) => {
-    acc[m.membershipType] = (acc[m.membershipType] ?? 0) + 1
+    const pName = m.subscriptions?.[0]?.planNameSnapshot || "OTHERS"
+    const standard = ["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"]
+    const bucket = standard.includes(pName) ? pName : "OTHERS"
+    acc[bucket] = (acc[bucket] ?? 0) + 1
     return acc
   }, {} as Record<string, number>)
 
@@ -96,7 +98,9 @@ export default function MembersPage() {
 
     const matchesPlan =
       planFilter === "All Plans" ? true :
-      m.membershipType === planMap[planFilter]
+      planFilter === "Others"
+        ? !["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"].includes(m.subscriptions?.[0]?.planNameSnapshot || "")
+        : m.subscriptions?.[0]?.planNameSnapshot === planMap[planFilter]
 
     return matchesSearch && matchesStatus && matchesPlan
   })
@@ -112,9 +116,9 @@ export default function MembersPage() {
     // Payment filter
     const matchesPayment =
       paymentFilter === "All Payments" ? true :
-      paymentFilter === "Paid" ? m.isPaidFull :
-      paymentFilter === "Unpaid" ? !m.isPaidFull :
-      true
+        paymentFilter === "Paid" ? m.isPaidFull :
+          paymentFilter === "Unpaid" ? !m.isPaidFull :
+            true
 
     return matchesPayment
   })
@@ -137,7 +141,7 @@ export default function MembersPage() {
         }
         .animate-fadeUp { animation: fadeUp 0.4s ease-out forwards; }
       `}</style>
-      
+
       {/* TOP ROW: Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -156,7 +160,7 @@ export default function MembersPage() {
       <div className="mt-8 flex flex-col md:flex-row gap-4 items-start md:items-center">
         {/* Search Input */}
         <div className="relative w-full md:max-w-[320px] flex-1">
-          <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#333333]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#333333]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
           <input
             type="text"
             value={search}
@@ -174,8 +178,8 @@ export default function MembersPage() {
               onClick={() => setStatusFilter(tab)}
               className={`
                 px-4 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200 whitespace-nowrap cursor-pointer
-                ${statusFilter === tab 
-                  ? "bg-[#1C1C1C] text-white border border-[#2A2A2A] shadow-sm shadow-black/20" 
+                ${statusFilter === tab
+                  ? "bg-[#1C1C1C] text-white border border-[#2A2A2A] shadow-sm shadow-black/20"
                   : "bg-transparent text-[#444444] border border-transparent hover:text-[#888888]"}
               `}
             >
@@ -189,10 +193,10 @@ export default function MembersPage() {
       <div className="mt-3 flex gap-2 flex-wrap">
         {["All Payments", "Paid", "Unpaid"].map(tab => {
           const isActive = paymentFilter === tab
-          const count = 
+          const count =
             tab === "Paid" ? paidCount :
-            tab === "Unpaid" ? unpaidCount :
-            null
+              tab === "Unpaid" ? unpaidCount :
+                null
           return (
             <button
               key={tab}
@@ -302,13 +306,17 @@ export default function MembersPage() {
                     <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">
                       Paid
                     </span>
+                  ) : member.remaining > 0 ? (
+                    <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">
+                      ₹{member.remaining.toLocaleString('en-IN')} due
+                    </span>
                   ) : planPrice === 0 ? (
                     <span className="inline-block bg-[#1C1C1C] text-[#555555] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#2A2A2A]">
                       Free
                     </span>
                   ) : (
-                    <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">
-                      ₹{planPrice.toLocaleString('en-IN')} due
+                    <span className="inline-block bg-[#444444]/10 text-[#888888] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#444444]/20">
+                      Pending
                     </span>
                   )
 
@@ -321,17 +329,17 @@ export default function MembersPage() {
 
                   // Plan badge logic
                   const isPremiumPlan = member.membershipType === "ANNUAL"
-                  const planBadgeClass = isPremiumPlan 
-                    ? "bg-[#D11F00]/10 text-[#D11F00] border border-[#D11F00]/20" 
+                  const planBadgeClass = isPremiumPlan
+                    ? "bg-[#D11F00]/10 text-[#D11F00] border border-[#D11F00]/20"
                     : "bg-[#1C1C1C] text-[#888888] border border-[#242424]"
 
                   // Expiry color logic
-                  const expiresColorClass = isExpired 
-                    ? "text-[#D11F00]" 
+                  const expiresColorClass = isExpired
+                    ? "text-[#D11F00]"
                     : isExpiringSoon ? "text-[#FF6B00]" : "text-[#666666]"
 
                   return (
-                    <tr 
+                    <tr
                       key={member.id}
                       onClick={() => router.push(`/admin/members/${member.id}`)}
                       className="border-b border-[#0D0D0D] hover:bg-[#0D0D0D] cursor-pointer transition-colors duration-150 group"
@@ -355,21 +363,21 @@ export default function MembersPage() {
                       {/* PLAN COLUMN */}
                       <td className="px-5 py-4">
                         <span className={`inline-block text-[11px] px-2.5 py-1 rounded-md font-medium ${planBadgeClass}`}>
-                          {formatPlan(member.membershipType)}
+                          {formatPlan(latestSubscription?.planNameSnapshot || "OTHERS")}
                         </span>
                       </td>
 
                       {/* START DATE */}
                       <td className="px-5 py-4">
                         <span className="text-[#666666] text-[12px]">
-                          {formatDate(member.startDate)}
+                          {formatDate(latestSubscription?.startDate || "")}
                         </span>
                       </td>
 
                       {/* EXPIRES DATE */}
                       <td className="px-5 py-4">
                         <span className={`text-[12px] font-medium ${expiresColorClass}`}>
-                          {formatDate(member.endDate)}
+                          {formatDate(latestSubscription?.endDate || "")}
                         </span>
                       </td>
 
@@ -388,20 +396,20 @@ export default function MembersPage() {
                           >
                             {restoreMemberMutation.isPending && restoreMemberMutation.variables === member.id ? (
                               <>
-                                <svg className="w-3 h-3 animate-spin" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/></svg>
+                                <svg className="w-3 h-3 animate-spin" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1" /></svg>
                                 Restoring...
                               </>
                             ) : (
                               <>
                                 Restore
-                                <svg className="w-3 h-3 hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                                <svg className="w-3 h-3 hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
                               </>
                             )}
                           </button>
                         ) : (
                           <span className="text-[#444444] hover:text-[#D11F00] text-[12px] font-medium group-hover:text-[#D11F00] transition-colors flex items-center gap-1 cursor-pointer">
                             View
-                            <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                            <svg className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
                           </span>
                         )}
                       </td>

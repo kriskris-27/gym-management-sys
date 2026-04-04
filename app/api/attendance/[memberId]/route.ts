@@ -41,21 +41,21 @@ export async function GET(
     }
 
     // 2. Head Count (Total Records for Pagination)
-    const totalSessions = await prisma.attendance.count({
+    const totalSessions = await prisma.attendanceSession.count({
       where: { memberId },
     })
 
     // 3. Paginated Data Fetch
-    const records = await prisma.attendance.findMany({
+    const records = await prisma.attendanceSession.findMany({
       where: { memberId },
-      orderBy: { date: "desc" }, 
+      orderBy: { sessionDay: "desc" }, 
       skip,
       take: limit,
       select: {
-        date: true,
-        checkedInAt: true,
-        checkedOutAt: true,
-        durationMinutes: true,
+        sessionDay: true,
+        checkIn: true,
+        checkOut: true,
+        status: true,
         autoClosed: true,
       },
     })
@@ -67,22 +67,24 @@ export async function GET(
       totalSessions,
       page,
       limit,
-      records: records.map((r: { date: Date; checkedInAt: Date; checkedOutAt: Date | null; durationMinutes: number | null; autoClosed: boolean }) => ({
-        date: (() => {
-          const istOffset = 5.5 * 60 * 60 * 1000
-          const istDate = new Date(
-            r.date.getTime() + istOffset
-          )
-          return istDate.toISOString().split("T")[0]
-        })(),
-        checkedInAt: r.checkedInAt.toISOString(),
-        checkedOutAt: r.checkedOutAt?.toISOString() || null,
-        durationMinutes: r.durationMinutes,
-        durationFormatted: r.durationMinutes 
-          ? formatDuration(r.durationMinutes) 
-          : (r.checkedOutAt ? "0min" : "ongoing"),
-        autoClosed: r.autoClosed,
-      })),
+      records: records.map((r) => {
+        const checkOutDate = r.checkOut ? new Date(r.checkOut) : null
+        const checkInDate = new Date(r.checkIn)
+        const durationMin = checkOutDate 
+          ? Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 60000) 
+          : null
+
+        return {
+          date: r.sessionDay.toISOString().split("T")[0],
+          checkedInAt: r.checkIn.toISOString(),
+          checkedOutAt: r.checkOut?.toISOString() || null,
+          durationMinutes: durationMin,
+          durationFormatted: durationMin 
+            ? formatDuration(durationMin) 
+            : (r.checkOut ? "0min" : "ongoing"),
+          autoClosed: r.autoClosed || r.status === "AUTO_CLOSED",
+        }
+      }),
     })
 
   } catch (error) {

@@ -72,9 +72,9 @@ export async function GET(request: Request) {
       id: p.id,
       memberId: p.memberId,
       memberName: p.member.name,
-      finalAmount: p.finalAmount,
-      createdAt: p.createdAt.toISOString(),
-      method: p.method,
+      amount: p.finalAmount,
+      date: p.createdAt.toISOString(),
+      mode: p.method,
       notes: p.notes
     }))
 
@@ -112,23 +112,38 @@ export async function POST(request: Request) {
 
     const data = validated.data
 
-    // 1. Verify Member is Valid (Exists and not deleted)
+    // 1. Verify Member is Valid
     const member = await prisma.member.findUnique({
-      where: { id: data.memberId }
+      where: { id: data.memberId },
+      include: {
+        subscriptions: {
+          where: { status: "ACTIVE" },
+          take: 1,
+          orderBy: { createdAt: "desc" }
+        }
+      }
     })
 
     if (!member || member.status === "DELETED") {
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
 
+    const activeSub = member.subscriptions[0] || null
+    const baseAmount = activeSub ? activeSub.planPriceSnapshot : data.amount
+
     // 2. Insert into Ledger
     const payment = await prisma.payment.create({
       data: {
         memberId: data.memberId,
-        finalAmount: data.finalAmount,
-        createdAt: data.createdAt,
-        method: data.method,
-        notes: data.notes,
+        subscriptionId: activeSub?.id || null,   
+        baseAmount: baseAmount,                 // Use sub snapshot as base truth
+        discountAmount: 0,
+        finalAmount: data.amount,               // The actual cash/upi paid
+        createdAt: data.date,
+        method: (data.mode as any),
+        notes: data.notes || "",
+        status: "SUCCESS",
+        purpose: "SUBSCRIPTION"
       },
       include: {
         member: { select: { name: true } }
@@ -142,9 +157,9 @@ export async function POST(request: Request) {
         id: payment.id,
         memberId: payment.memberId,
         memberName: member.name,
-        finalAmount: payment.finalAmount,
-        createdAt: payment.createdAt.toISOString(),
-        method: payment.method,
+        amount: payment.finalAmount,
+        date: payment.createdAt.toISOString(),
+        mode: payment.method,
         notes: payment.notes
       }
     }, { status: 201 })

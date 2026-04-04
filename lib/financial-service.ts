@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma"
+import { prisma } from "./prisma"
 import { getMemberSubscriptionFinancialSummary } from "../domain/payment"
 import { getActiveSubscription } from "../domain/subscription"
 
@@ -48,25 +48,74 @@ export async function computeMemberFinancials(memberId: string): Promise<MemberF
 }
 
 /**
- * Batch version for performance - avoids N+1 queries
+ * Optimized Batch version for performance - FIXES N+1
+ * Aggregates all subscription prices and payments for multiple members in only 2 queries.
  */
 export async function computeMultipleMembersFinancials(memberIds: string[]): Promise<Map<string, MemberFinancials>> {
   if (memberIds.length === 0) {
     return new Map()
   }
 
+  console.log(`[Financial Service] Batch computing financials for ${memberIds.length} members`)
+
+  // 1. Bulk Aggregate Revenue (from Subscriptions)
+  const subscriptions = await prisma.subscription.groupBy({
+    by: ['memberId'],
+    where: { 
+      memberId: { in: memberIds },
+      status: { not: 'CANCELLED' }
+    },
+    _sum: {
+      planPriceSnapshot: true
+    }
+  })
+
+  // 2. Bulk Aggregate Payments & Discounts
+  const payments = await prisma.payment.groupBy({
+    by: ['memberId'],
+    where: {
+      memberId: { in: memberIds },
+      status: 'SUCCESS'
+    },
+    _sum: {
+      finalAmount: true,
+      discountAmount: true
+    }
+  })
+
+  // 3. Map outcomes for efficient lookup
   const financialsMap = new Map<string, MemberFinancials>()
   
-  // Use domain functions for each member
-  for (const memberId of memberIds) {
-    try {
-      const financials = await computeMemberFinancials(memberId)
-      financialsMap.set(memberId, financials)
-    } catch (error) {
-      console.error(`[Financial Service] Error computing financials for member: ${memberId}`, error)
-      // Continue with other members
-    }
-  }
+  // Initialize map with zeros for all requested IDs
+  memberIds.forEach(id => {
+    financialsMap.set(id, {
+      totalAmount: 0,
+      totalPaid: 0,
+      remaining: 0,
+      isPaidFull: true
+    })
+  })
+
+  // Merge Revenue
+  subscriptions.forEach(sub => {
+    const data = financialsMap.get(sub.memberId)!
+    data.totalAmount = sub._sum.planPriceSnapshot || 0
+  })
+
+  // Merge Payments and compute final state
+  payments.forEach(pay => {
+    const data = financialsMap.get(pay.memberId)!
+    data.totalPaid = pay._sum.finalAmount || 0
+    // Internal tracking for discount
+    ;(data as any).totalDiscount = pay._sum.discountAmount || 0
+  })
+
+  // Final Pass to compute remaining/paid-full logic consistently
+  financialsMap.forEach((data) => {
+    const disc = (data as any).totalDiscount || 0
+    data.remaining = Math.max(0, Math.round(data.totalAmount - (data.totalPaid + disc)))
+    data.isPaidFull = data.remaining <= 1 // ₹1 tolerance consistent with domain
+  })
 
   return financialsMap
 }

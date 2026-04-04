@@ -59,6 +59,15 @@ export const MemberCreateSchema = z.object({
     },
     z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high").default(0)
   ),
+  paidAmount: z.preprocess(
+    (val) => {
+      if (val === "" || val === null || val === undefined) return 0
+      const num = Number(val)
+      return isNaN(num) ? 0 : num
+    },
+    z.number().min(0, "Paid amount cannot be negative").max(99999, "Amount too high").default(0)
+  ),
+  paymentMode: PaymentModeEnum.default("CASH"),
   manualPlanName: z.string().trim().max(100).optional(),
   manualAmount: z.coerce.number().min(0).max(99999).optional(),
 }).strict()
@@ -138,14 +147,14 @@ export const AttendanceScanSchema = z.object({
  */
 export const PaymentCreateSchema = z.object({
   memberId: z.string().min(1, "Member ID is required"),
-  finalAmount: z.number()
+  amount: z.number()
     .positive("Amount must be a positive number")
     .max(99999, "Amount exceeds maximum transaction limit"),
-  createdAt: z.coerce.date()
+  date: z.coerce.date()
     .refine((date) => date <= new Date(new Date().setHours(23, 59, 59)), {
       message: "Payment date cannot be in the future",
     }),
-  method: PaymentModeEnum,
+  mode: PaymentModeEnum,
   notes: z.string()
     .trim()
     .max(500, "Notes cannot exceed 500 characters")
@@ -195,7 +204,12 @@ export const RenewMemberSchema = z.object({
     .min(0, "Price cannot be negative")
     .max(99999, "Price too large")
     .optional(),
-  manualPlanName: z.string().optional(), 
+  manualPlanName: z.string().optional(),
+  paidAmount: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined) ? 0 : Number(val),
+    z.number().min(0).max(99999).default(0)
+  ),
+  paymentMode: PaymentModeEnum.optional().default("CASH"),
 }).strict();
 
 /**
@@ -203,4 +217,11 @@ export const RenewMemberSchema = z.object({
  */
 export const RestoreMemberSchema = z.object({
   action: z.literal("restore")
+}).strict();
+
+/**
+ * Member Cancel Subscription
+ */
+export const CancelSubscriptionSchema = z.object({
+  action: z.literal("cancel")
 }).strict();

@@ -63,7 +63,7 @@ export async function createSubscription(
   customPrice?: number
 ): Promise<Subscription> {
   return createSubscriptionWithDate(memberId, planId, customPrice)
-}eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+}
 
 /**
  * Create subscription with controlled start date (for renewals)

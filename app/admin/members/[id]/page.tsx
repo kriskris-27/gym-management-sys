@@ -56,7 +56,11 @@ interface RenewalFormData {
   endDate?: string
   customPrice?: number
   manualPlanName?: string
+  paidAmount?: number
+  paymentMode?: "CASH" | "UPI" | "CARD"
 }
+
+
 
 interface RenewalPayload {
   action: string
@@ -65,7 +69,11 @@ interface RenewalPayload {
   endDate?: string
   customPrice?: number | undefined
   manualPlanName?: string
+  paidAmount?: number
+  paymentMode?: "CASH" | "UPI" | "CARD"
 }
+
+
 
 const paymentSchema = z.object({
   amount: z.union([z.string(), z.number()])
@@ -143,8 +151,11 @@ export default function MemberProfilePage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [showRenewalModal, setShowRenewalModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showCancelModal, setShowCancelModal] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [cancelLoading, setCancelLoading] = useState(false)
   const [renewLoading, setRenewLoading] = useState(false)
+
   const [renewError, setRenewError] = useState("")
   const [deleteLoading, setDeleteLoading] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -194,6 +205,32 @@ export default function MemberProfilePage() {
     }
   }
 
+  // Cancel Handler
+  const handleCancelSubscription = async () => {
+    setCancelLoading(true)
+    try {
+      const res = await fetch(`/api/members/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" })
+      })
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ["member", id] })
+        queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
+        queryClient.invalidateQueries({ queryKey: ["members"] })
+        setShowCancelModal(false)
+      } else {
+        const err = await res.json()
+        alert(err.error || "Failed to cancel subscription")
+      }
+    } catch (e) {
+      console.error(e)
+      alert("Network error")
+    } finally {
+      setCancelLoading(false)
+    }
+  }
+
   // Payment Form Hook
   const getTodayStr = () => {
     const now = new Date()
@@ -229,13 +266,10 @@ export default function MemberProfilePage() {
       return
     }
     
-    // Calculate totals
-    const totalPaid = Number(paymentSummary.totalPaid || 0)
-    const totalAmount = Number(paymentSummary.totalAmount || 0)
-    const afterPayment = totalPaid + amount
-    const afterRemaining = totalAmount - afterPayment
+    const currentRemaining = Number(paymentSummary.remaining || 0)
+    const afterRemaining = currentRemaining - amount
     
-    console.log("[Live Total] Calculation:", { totalPaid, totalAmount, afterPayment, afterRemaining })
+    console.log("[Live Total] Calculation:", { currentRemaining, amount, afterRemaining })
     
     // Set result based on remaining amount
     let result = ""
@@ -401,13 +435,18 @@ export default function MemberProfilePage() {
 
   const onRenewalSubmit = async (data: RenewalFormData) => {
     try {
+      setRenewError("")
+      setRenewLoading(true)
       const payload: RenewalPayload = {
         action: "renew",
         membershipType: data.membershipType,
         startDate: data.startDate,
         customPrice: data.customPrice ? Number(data.customPrice) : undefined,
-        manualPlanName: data.manualPlanName
+        manualPlanName: data.manualPlanName,
+        paidAmount: data.paidAmount ? Number(data.paidAmount) : 0,
+        paymentMode: data.paymentMode || "CASH"
       }
+
       if (data.membershipType === "OTHERS" && data.endDate) {
         payload.endDate = data.endDate
       }
@@ -427,9 +466,15 @@ export default function MemberProfilePage() {
           setRenewalSuccess(false)
           resetRenewal()
         }, 500)
+      } else {
+        const errorData = await res.json()
+        setRenewError(errorData.error || "Failed to renew membership")
       }
     } catch (e) {
       console.error(e)
+      setRenewError("A network error occurred. Please try again.")
+    } finally {
+      setRenewLoading(false)
     }
   }
 
@@ -472,9 +517,17 @@ export default function MemberProfilePage() {
   }
 
   const now = new Date()
-  const isExpired = member.endDate ? new Date(member.endDate) < now : true
+  const isExpired = member.endDate ? (() => {
+    const end = new Date(member.endDate)
+    // Set to end of day to avoid premature expiry
+    const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999)
+    return endDay < now
+  })() : false
+
+  const hasNoPlan = !member.endDate || member.membershipType === "NONE"
   const daysLeft = member.endDate ? Math.ceil((new Date(member.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : 0
-  const isExpiringSoon = daysLeft >= 0 && daysLeft <= 7
+  const isExpiringSoon = !isExpired && daysLeft >= 0 && daysLeft <= 7
+
   const initial = member.name?.charAt(0).toUpperCase() || "?"
 
   const totalPages = Math.ceil(attendance.total / ATTENDANCE_LIMIT) || 1
@@ -500,7 +553,8 @@ export default function MemberProfilePage() {
           <span>←</span> Members
         </button>
         <div className="flex gap-2 items-center">
-          {(member?.status === "INACTIVE" || isExpired) && (
+          {/* RENEW / SWITCH BUTTON - Shows if status is INACTIVE or Subscription is Expired/Cancelled */}
+          {(member?.status === "INACTIVE" || member?.isPaidFull === undefined || isExpired || member?.subscriptionStatus !== "ACTIVE") && (
             <button
               onClick={() => {
                 setShowRenewalModal(true)
@@ -508,7 +562,15 @@ export default function MemberProfilePage() {
               }}
               className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] tracking-widest uppercase px-4 py-2.5 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
             >
-              Renew
+              Switch / Renew
+            </button>
+          )}
+          {member?.status === "ACTIVE" && !isExpired && (
+            <button
+              onClick={() => setShowCancelModal(true)}
+              className="bg-transparent border border-[#D11F00]/30 text-[#D11F00] hover:bg-[#D11F00]/10 text-[12px] font-bold tracking-widest uppercase px-5 py-2.5 rounded-lg transition-all cursor-pointer"
+            >
+              Cancel Sub
             </button>
           )}
           <button
@@ -526,21 +588,29 @@ export default function MemberProfilePage() {
         </div>
       </div>
 
-      {/* EXPIRED BANNER */}
-      {member?.status === "INACTIVE" && (
+
+      {/* NO ACTIVE PLAN BANNER */}
+      {(member?.status === "INACTIVE" || isExpired || hasNoPlan || member?.subscriptionStatus !== "ACTIVE") && (
         <div className="bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-xl px-5 py-4 mb-4 flex justify-between items-center animate-fade">
           <div>
-            <p className="text-[#F59E0B] font-bold text-[14px]">⚠ Membership Expired</p>
-            <p className="text-[#888888] text-[12px] mt-0.5">Expired on {formatDate(member.endDate)}</p>
+            <p className="text-[#F59E0B] font-bold text-[14px]">
+              {isExpired ? "⚠ Membership Expired" : "⚠ No Active Membership"}
+            </p>
+            <p className="text-[#888888] text-[12px] mt-0.5">
+              {member?.subscriptionStatus === "CANCELLED" ? "Last plan was cancelled. Switch to new plan." : 
+               isExpired ? `Expired on ${formatDate(member.endDate)}` : 
+               "Member needs a plan assignment to record attendance."}
+            </p>
           </div>
           <button
             onClick={() => setShowRenewalModal(true)}
             className="bg-[#F59E0B] hover:bg-[#D97706] text-black font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
           >
-            Renew Now →
+            Switch Plan →
           </button>
         </div>
       )}
+
 
       {/* MEMBER INFO CARD */}
       <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 flex flex-col md:flex-row gap-6 items-start animate-fade">
@@ -1042,17 +1112,31 @@ export default function MemberProfilePage() {
               </div>
 
               <div>
-                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Plan Amount</label>
+                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Paid Amount (Optional)</label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
                   <input
-                    {...regRenewal("customPrice")}
+                    {...regRenewal("paidAmount")}
                     type="number"
-                    placeholder="Auto-filled from plan"
-                    className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-medium"
+                    placeholder="Enter amount paid today"
+                    className="w-full bg-[#0F0F0F] border border-[#242424] text-[#10B981] text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981]/20 focus:outline-none transition-all duration-200 font-bold"
                   />
                 </div>
+                <p className="text-[#444444] text-[10px] mt-1.5 font-medium">Leave as 0 if they haven&apos;t paid yet.</p>
               </div>
+
+              <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Payment Mode</label>
+                <select
+                  {...regRenewal("paymentMode")}
+                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 cursor-pointer appearance-none"
+                >
+                  <option value="CASH">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="CARD">Card</option>
+                </select>
+              </div>
+
 
               <div className="pt-4 flex gap-3">
                 <button
@@ -1118,7 +1202,10 @@ export default function MemberProfilePage() {
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Membership Plan</label>
                 <select
                   {...regEdit("membershipType")}
-                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 cursor-pointer appearance-none"
+                  disabled={paymentSummary && paymentSummary.totalPaid > 0}
+                  className={`w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 appearance-none
+                    ${paymentSummary && paymentSummary.totalPaid > 0 ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
+                  `}
                 >
                   <option value="MONTHLY">Monthly</option>
                   <option value="QUARTERLY">Quarterly</option>
@@ -1126,7 +1213,11 @@ export default function MemberProfilePage() {
                   <option value="ANNUAL">Annual</option>
                   <option value="OTHERS">Others (Manual Entry)</option>
                 </select>
+                {paymentSummary && paymentSummary.totalPaid > 0 && (
+                  <p className="text-[#D11F00] text-[10px] mt-1.5 font-medium italic">Plan cannot be changed after payments are made. Use Renewal/Cancel instead.</p>
+                )}
               </div>
+
 
               {editMembershipType === "OTHERS" && (
                 <div className="space-y-5 animate-fade">
@@ -1146,10 +1237,14 @@ export default function MemberProfilePage() {
                         {...regEdit("manualAmount", { valueAsNumber: true })}
                         type="number"
                         placeholder="5000"
-                        className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-medium"
+                        disabled={paymentSummary && paymentSummary.totalPaid > 0}
+                        className={`w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-medium
+                          ${paymentSummary && paymentSummary.totalPaid > 0 ? "opacity-50 cursor-not-allowed" : ""}
+                        `}
                       />
                     </div>
                   </div>
+
                 </div>
               )}
 
@@ -1237,6 +1332,45 @@ export default function MemberProfilePage() {
           </div>
         </div>
       )}
+
+      {/* CANCEL SUBSCRIPTION MODAL */}
+      {showCancelModal && member && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setShowCancelModal(false)} />
+          <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[400px] w-full relative z-10 animate-modal shadow-2xl shadow-black/50">
+            <h2 className="text-white text-[18px] font-black tracking-tight">Cancel Subscription</h2>
+            
+            <p className="text-[#444444] text-[13px] mt-3">
+              Are you sure you want to cancel <span className="font-bold text-white">{member.name}&apos;s</span> current active plan?
+            </p>
+
+            <div className="bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-lg px-4 py-3 mt-4">
+              <p className="text-[#F59E0B] text-[12px]">
+                This will instantly remove the remaining debt for this plan from the member&apos;s balance. Use this if the member is switching plans mid-cycle.
+              </p>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowCancelModal(false)}
+                className="flex-1 bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] font-bold text-[12px] tracking-widest uppercase px-6 py-3 rounded-lg transition-all duration-200 cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleCancelSubscription}
+                disabled={cancelLoading}
+                className={`flex-1 text-white font-black text-[12px] tracking-widest uppercase px-6 py-3 rounded-lg transition-all duration-200 flex items-center justify-center
+                  ${cancelLoading ? "bg-[#D11F00] opacity-70 cursor-not-allowed" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
+                `}
+              >
+                {cancelLoading ? "Processing..." : "Confirm Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

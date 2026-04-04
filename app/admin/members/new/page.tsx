@@ -15,6 +15,8 @@ const schema = z.object({
     "MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "OTHERS"
   ]),
   discountAmount: z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high"),
+  paidAmount: z.number().min(0, "Amount cannot be negative").max(99999, "Amount too high"),
+  paymentMode: z.enum(["CASH", "UPI", "CARD"]),
   startDate: z.string().min(1, "Start date required"),
   endDate: z.string().optional(),
   manualPlanName: z.string().optional(),
@@ -104,6 +106,8 @@ export default function AddMemberPage() {
     defaultValues: {
       membershipType: "MONTHLY",
       discountAmount: 0,
+      paidAmount: 0,
+      paymentMode: "CASH",
       startDate: getTodayStr(),
       endDate: "",
       manualPlanName: "",
@@ -129,11 +133,22 @@ export default function AddMemberPage() {
       setBasePrice(price)
       // Reset discount if plan changes, to be safe
       setValue("discountAmount", 0, { shouldValidate: true })
+      // Auto-set paid amount to full price initially
+      setValue("paidAmount", price, { shouldValidate: true })
     } else if (membershipType === "OTHERS") {
       setBasePrice(0)
       setValue("discountAmount", 0, { shouldValidate: true })
+      setValue("paidAmount", 0, { shouldValidate: true })
     }
   }, [membershipType, plans, setValue])
+
+  // Sync paidAmount with finalAmount unless user manually changed it? 
+  // For simplicity, let's just sync it when discount changes too
+  useEffect(() => {
+     if (membershipType !== "OTHERS") {
+       setValue("paidAmount", finalAmount, { shouldValidate: true })
+     }
+  }, [finalAmount, membershipType, setValue])
 
   // Auto-calculate end date
   useEffect(() => {
@@ -350,6 +365,54 @@ export default function AddMemberPage() {
           {errors.discountAmount && (
             <p className="text-[#D11F00] text-[11px] mt-1 animate-error">{errors.discountAmount.message as string}</p>
           )}
+
+          {/* PAYMENT RECEIPT: Actual Received & Mode */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-5 bg-[#D11F00]/5 border border-[#D11F00]/10 rounded-xl relative overflow-hidden group transition-all hover:bg-[#D11F00]/8 hover:border-[#D11F00]/20">
+            {/* Amount Paid Today */}
+            <div className="space-y-1">
+               <label className="text-white text-[10px] font-bold tracking-[0.2em] uppercase block mb-2 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-all">
+                <span className="w-1 h-3 bg-[#D11F00] rounded-full inline-block"></span>
+                Amount Received Today (₹)
+              </label>
+              <input
+                {...register("paidAmount", { valueAsNumber: true })}
+                type="number"
+                min="0"
+                placeholder="0"
+                className={`w-full bg-[#0F0F0F]/80 backdrop-blur-md border ${errors.paidAmount ? 'border-[#D11F00]' : 'border-[#242424]'} text-[18px] font-black text-[#D11F00] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:outline-none transition-all placeholder:text-[#222222]`}
+              />
+              <div className="flex justify-between items-center px-1">
+                <p className="text-[#444444] text-[10px] italic font-medium">Balance Due: ₹{Math.max(0, finalAmount - (watch("paidAmount") || 0))}</p>
+                <button 
+                  type="button" 
+                  onClick={() => setValue("paidAmount", finalAmount)}
+                  className="text-[#D11F00] text-[9px] font-bold uppercase tracking-tighter hover:underline"
+                >
+                  Full Payment
+                </button>
+              </div>
+            </div>
+
+            {/* Payment Mode */}
+            <div>
+              <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-3">
+                Payment Mode
+              </label>
+              <div className="relative">
+                <select
+                  {...register("paymentMode")}
+                  className="w-full bg-[#0F0F0F]/80 backdrop-blur-md border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3.5 focus:border-[#D11F00] focus:outline-none transition-all cursor-pointer appearance-none"
+                >
+                  <option value="CASH">CASH</option>
+                  <option value="UPI">UPI / G-PAY</option>
+                  <option value="CARD">DEBIT / CREDIT CARD</option>
+                </select>
+                <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-[#555555]">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {/* FIELD 4: Start Date */}

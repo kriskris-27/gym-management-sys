@@ -370,8 +370,9 @@ export async function getSubscriptionPaymentSummary(
 }
 
 /**
- * Get comprehensive financial summary for a member's subscription
- * Includes total amount, paid amount, remaining balance, and payment status
+ * Get comprehensive financial summary for a member (GLOBAL BALANCE)
+ * Includes total amount across ALL subscriptions vs Total paid across ALL payments
+ * SINGLE SOURCE OF TRUTH for a member's debt status.
  */
 export async function getMemberSubscriptionFinancialSummary(memberId: string): Promise<{
   totalAmount: number
@@ -380,48 +381,55 @@ export async function getMemberSubscriptionFinancialSummary(memberId: string): P
   isPaidFull: boolean
   subscriptionId?: string
   subscriptionStatus?: string
+  latestPlanName?: string
 }> {
-  console.log(`[Payment Domain] Getting financial summary for member: ${memberId}`)
+  console.log(`[Payment Domain] Computing global balance for member: ${memberId}`)
   
-  // Get active subscription for the member
+  // 1. Get Active Subscription (if any) for current status display
   const activeSubscription = await getActiveSubscription(memberId)
   
-  if (!activeSubscription) {
-    // No active subscription - check payment history for any payments
-    const paymentSummary = await prisma.payment.aggregate({
-      where: {
-        memberId,
-        status: 'SUCCESS'
-      },
-      _sum: {
-        finalAmount: true
-      }
-    })
-    
-    const totalPaid = paymentSummary._sum.finalAmount || 0
-    
-    return {
-      totalAmount: 0,
-      totalPaid,
-      remaining: 0,
-      isPaidFull: true // No outstanding amount
+  // 2. Aggregate Total Revenue from ALL subscriptions
+  const subSummary = await prisma.subscription.aggregate({
+    where: { 
+      memberId,
+      status: { not: 'CANCELLED' } // Don't charge for cancelled subs
+    },
+    _sum: {
+      planPriceSnapshot: true
     }
-  }
-  
-  // Get payment summary for the active subscription
-  const subscriptionPaymentSummary = await getSubscriptionPaymentSummary(activeSubscription.id)
-  
-  const totalAmount = activeSubscription.planPriceSnapshot
-  const totalPaid = subscriptionPaymentSummary.totalFinalAmount
-  const remaining = totalAmount - totalPaid
-  const isPaidFull = remaining <= 0
-  
+  })
+
+  // 3. Aggregate Total Payments & Discounts from ALL history
+  const paySummary = await prisma.payment.aggregate({
+    where: {
+      memberId,
+      status: 'SUCCESS'
+    },
+    _sum: {
+      finalAmount: true,
+      discountAmount: true
+    }
+  })
+
+  const totalAmount = subSummary._sum.planPriceSnapshot || 0
+  const totalPaid = paySummary._sum.finalAmount || 0
+  const totalDiscount = paySummary._sum.discountAmount || 0
+  const remaining = Math.max(0, Math.round(totalAmount - (totalPaid + totalDiscount)))
+  const isPaidFull = remaining <= 1 // ₹1 tolerance
+
+  // 4. Get latest subscription for the name snapshot in the member list
+  const latestSubscription = activeSubscription || await prisma.subscription.findFirst({
+    where: { memberId },
+    orderBy: { createdAt: 'desc' }
+  })
+
   return {
     totalAmount,
     totalPaid,
     remaining,
     isPaidFull,
-    subscriptionId: activeSubscription.id,
-    subscriptionStatus: activeSubscription.status
+    subscriptionId: activeSubscription?.id,
+    subscriptionStatus: activeSubscription?.status || "INACTIVE",
+    latestPlanName: latestSubscription?.planNameSnapshot || "N/A"
   }
 }

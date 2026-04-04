@@ -46,8 +46,10 @@ export async function GET(request: Request) {
           orderBy: { createdAt: 'desc' },
           take: 1,
           select: {
+            startDate: true,
             endDate: true,
             status: true,
+            planNameSnapshot: true,
             planPriceSnapshot: true
           }
         }
@@ -55,7 +57,10 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" },
     })
 
-    return NextResponse.json({ members }, {
+    const { attachFinancialsToMembers } = await import("@/lib/financial-service")
+    const membersWithFinance = await attachFinancialsToMembers(members as any)
+
+    return NextResponse.json({ members: membersWithFinance }, {
       headers: {
         "Cache-Control": "s-maxage=60, stale-while-revalidate",
       },
@@ -105,9 +110,21 @@ export async function POST(request: Request) {
 
       if (data.membershipType && data.startDate) {
         // Fetch plan to get duration and base price
-        const plan = await tx.plan.findUnique({
+        let plan = await tx.plan.findUnique({
           where: { name: data.membershipType }
         })
+
+        // Auto-bootstrap OTHERS plan if missing to prevent "Plan not found" errors
+        if (!plan && data.membershipType === "OTHERS") {
+          plan = await tx.plan.create({
+            data: {
+              name: "OTHERS",
+              price: 0,
+              durationDays: 1, // Default, manual plans use manual endDates anyway
+              isActive: true
+            }
+          })
+        }
 
         // 2. Determine Plan Details
         if (!plan) {
@@ -141,19 +158,19 @@ export async function POST(request: Request) {
             endDate: resolvedEndDate,
             status: "ACTIVE",
             planNameSnapshot: resolvedPlanName,
-            planPriceSnapshot: finalPrice,
+            planPriceSnapshot: resolvedBasePrice,
           }
         })
 
-        // 2. Create Payment Record
+        // 2. Create Payment Record (Installment Support)
         await tx.payment.create({
           data: {
             memberId: newMember.id,
             subscriptionId: subscription.id,
             baseAmount: resolvedBasePrice,
             discountAmount: discount,
-            finalAmount: finalPrice,
-            method: "CASH", 
+            finalAmount: data.paidAmount ?? finalPrice,
+            method: (data.paymentMode as any) || "CASH", 
             status: "SUCCESS",
             purpose: "SUBSCRIPTION"
           }
