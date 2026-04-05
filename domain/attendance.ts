@@ -51,6 +51,7 @@ export interface ScanResult {
 // Constants
 const MIN_SESSION_MINUTES = 0.17 // ~10 seconds for testing (0.17 minutes)
 const MAX_DURATION_MINUTES = 4 * 60
+const DEFAULT_CLOSING_HOUR = 22 // 10 PM IST — used for realistic auto-close checkOut
 const MIN_SCAN_INTERVAL_SECONDS = 5
 const CLEANUP_LIMIT_PER_MEMBER = 1 // Only cleanup this member's sessions
 
@@ -266,7 +267,7 @@ export async function scanMember(
 
 /**
  * Cleanup OLD sessions in transaction (only previous days, not today)
- * FIX: Only cleanup sessions from previous days, never today's sessions
+ * Uses gym closing time for realistic checkOut instead of 0-minute durations.
  */
 export async function cleanupOldSessionsInTransaction(
   memberId: string,
@@ -288,10 +289,18 @@ export async function cleanupOldSessionsInTransaction(
   })
 
   for (const session of oldOpenSessions) {
+    // Set checkOut to gym closing time (default 10 PM) on that session's day
+    const sessionDayIST = DateTime.fromJSDate(session.sessionDay, { zone: 'Asia/Kolkata' })
+    const closingTime = sessionDayIST.set({ hour: DEFAULT_CLOSING_HOUR, minute: 0, second: 0 })
+    const checkInTime = DateTime.fromJSDate(session.checkIn)
+    // Never set checkOut before checkIn
+    const checkOutTime = closingTime > checkInTime ? closingTime : checkInTime.plus({ minutes: 1 })
+
     await tx.attendanceSession.update({
       where: { id: session.id },
       data: {
-        checkOut: session.checkIn,
+        checkOut: checkOutTime.toJSDate(),
+        status: 'AUTO_CLOSED',
         autoClosed: true,
         closeReason: 'PREVIOUS_DAY'
       }
@@ -310,7 +319,7 @@ export function validateSession(
   sessionDay: Date,
   checkIn: Date,
   checkOut: Date | null,
-  now: Date = new Date()
+  nowJS: Date // Require explicit now to avoid implicit local new Date()
 ): {
   isValid: boolean
   errors: string[]
@@ -323,33 +332,37 @@ export function validateSession(
   let canCheckIn = false
   let canCheckOut = false
 
+  const checkInDT = fromDate(checkIn)
+  const nowDT = fromDate(nowJS)
+  const checkOutDT = checkOut ? fromDate(checkOut) : null
+
   // Rule 1: Check-in time validation
-  if (checkIn > now) {
+  if (checkInDT > nowDT) {
     errors.push("Check-in time cannot be in future")
   }
 
   // Rule 2: Check-out time validation
-  if (checkOut) {
-    if (checkOut.getTime() < checkIn.getTime()) {
+  if (checkOutDT) {
+    if (checkOutDT < checkInDT) {
       errors.push("Check-out time cannot be before check-in time")
     }
-    if (checkOut.getTime() > now.getTime()) {
+    if (checkOutDT > nowDT) {
       errors.push("Check-out time cannot be in future")
     }
 
+    // Check-out must be same day as check-in (IST)
+    const checkInIST = checkInDT.setZone('Asia/Kolkata')
+    const checkOutIST = checkOutDT.setZone('Asia/Kolkata')
 
-    // FIX: Check-out must be same day (IST)
-    // Note: getISTDateRange() doesn't accept parameters, so we use current time
-    
-    if (checkOut) {
+    if (!checkOutIST.hasSame(checkInIST, 'day')) {
       errors.push("Check-out must be on same day as check-in (IST)")
       warnings.push("Session will be auto-closed to previous day boundary")
     }
   }
 
   // Rule 3: Duration validation
-  if (checkOut) {
-    const duration = calcDuration(fromDate(checkIn), fromDate(checkOut))
+  if (checkOutDT) {
+    const duration = calcDuration(checkInDT, checkOutDT)
     
     if (duration < MIN_SESSION_MINUTES) {
       warnings.push(`Session duration ${duration}min is less than minimum ${MIN_SESSION_MINUTES}min`)
@@ -360,8 +373,8 @@ export function validateSession(
   }
 
   // Determine allowed actions
-  if (!checkOut) {
-    const durationSinceCheckIn = calcDuration(fromDate(checkIn), fromDate(now))
+  if (!checkOutDT) {
+    const durationSinceCheckIn = calcDuration(checkInDT, nowDT)
     canCheckIn = false // Already checked in
     canCheckOut = durationSinceCheckIn >= MIN_SESSION_MINUTES
   } else {
@@ -504,51 +517,4 @@ export async function getAttendanceStats(
   }
 }
 
-export async function batchCleanupStaleSessions(nowJS: Date = new Date()): Promise<number> {
-  const now = fromDate(nowJS)
-  const { startOfTodayIST } = getISTDateRange()
-  const CLEANUP_BATCH_SIZE = 20
-  
-  const sessionsToClean = await prisma.attendanceSession.findMany({
-    where: {
-      checkOut: null,
-      OR: [
-        { sessionDay: { lt: startOfTodayIST.toJSDate() } },
-      ]
-    },
-    take: CLEANUP_BATCH_SIZE,
-    orderBy: { checkIn: 'asc' }
-  })
 
-  let count = 0
-  for (const session of sessionsToClean) {
-    const sessionDay = fromDate(session.sessionDay)
-    if (sessionDay < startOfTodayIST) {
-      await prisma.attendanceSession.update({
-        where: { id: session.id },
-        data: {
-          checkOut: session.checkIn,
-          autoClosed: true,
-          closeReason: 'PREVIOUS_DAY'
-        }
-      })
-      count++
-      continue
-    }
-
-    const duration = calcDuration(fromDate(session.checkIn), now)
-    if (duration > MAX_DURATION_MINUTES) {
-      await prisma.attendanceSession.update({
-        where: { id: session.id },
-        data: {
-          checkOut: now.toJSDate(),
-          autoClosed: true,
-          closeReason: 'MAX_DURATION'
-        }
-      })
-      count++
-    }
-  }
-
-  return count
-}

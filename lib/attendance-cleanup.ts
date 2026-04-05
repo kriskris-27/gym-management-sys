@@ -1,34 +1,5 @@
 import { prisma } from "../lib/prisma"
-import { batchCleanupStaleSessions } from "../domain/attendance"
 
-// Re-export the function for other modules
-export { batchCleanupStaleSessions }
-
-/**
- * Auto-close invalid sessions for a specific member
- * Used during scan operations to ensure data integrity
- */
-export async function cleanupMemberSessions(memberId: string, now: Date = new Date()) {
-  // Use domain function for cleanup
-  return await batchCleanupStaleSessions(now)
-}
-
-/**
- * Batch cleanup of all stale sessions
- * Used by cron jobs and manual cleanup operations
- */
-export async function batchCleanupAllSessions(now: Date = new Date()) {
-  console.log(`[Attendance Cleanup] Starting batch cleanup`)
-  
-  try {
-    const cleanedCount = await batchCleanupStaleSessions(now)
-    console.log(`[Attendance Cleanup] Cleaned up ${cleanedCount} sessions`)
-    return cleanedCount
-  } catch (error) {
-    console.error(`[Attendance Cleanup] Error during batch cleanup:`, error)
-    throw error
-  }
-}
 
 /**
  * Cleanup sessions older than specified days

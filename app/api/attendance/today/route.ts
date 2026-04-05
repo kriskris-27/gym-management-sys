@@ -1,25 +1,18 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { getUTCDateRange, calcDuration, formatDuration, nowUTC, fromDate } from "@/lib/utils"
-import { batchCleanupStaleSessions } from "@/domain/attendance"
 
 /**
  * GET: Returns today's full attendance list for dashboard
  * Logic: Calculates live durations for members currently in the gym.
- * Includes serverless-friendly batched cleanup.
+ * Stale session cleanup is handled by the nightly cron job (/api/cron/close-sessions).
  * Authentication: Handled by proxy middleware
  */
 export async function GET() {
   // 1. TIME AUTHORITY - Use UTC as single source of truth
   const { todayUTC, tomorrowUTC } = getUTCDateRange()
-  const now = nowUTC().toJSDate()
 
   try {
-    // 2. SERVERLESS-FRIENDLY CLEANUP: Clean limited batch of stale sessions
-    const cleanedCount = await batchCleanupStaleSessions(now)
-    if (cleanedCount > 0) {
-      console.log(`🧹 Cleaned ${cleanedCount} stale attendance sessions`)
-    }
 
     // 3. FETCH TODAY'S ATTENDANCE
     const records = await prisma.attendanceSession.findMany({
@@ -94,7 +87,6 @@ export async function GET() {
         totalPresent,
         currentlyInside,
         records: formattedRecords,
-        cleanedSessions: cleanedCount, // For monitoring
       },
       {
         headers: {
