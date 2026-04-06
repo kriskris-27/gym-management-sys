@@ -190,10 +190,10 @@ export const PricingUpdateSchema = z.object({
     .max(5, "Maximum 5 plans allowed")
 }).strict();
 /**
- * Member Renewal
+ * Member Renewal & Switch
  */
 export const RenewMemberSchema = z.object({
-  action: z.literal("renew"),
+  action: z.enum(["renew", "switch"]),
   membershipType: z.enum([
     "MONTHLY", "QUARTERLY", "HALF_YEARLY",
     "ANNUAL", "OTHERS"

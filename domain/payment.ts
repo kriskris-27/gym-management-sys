@@ -379,6 +379,12 @@ export async function getMemberSubscriptionFinancialSummary(memberId: string): P
   totalPaid: number
   remaining: number
   isPaidFull: boolean
+  globalTotalAmount: number
+  globalTotalPaid: number
+  globalRemaining: number
+  currentPlanAmount: number
+  currentPlanPaid: number
+  currentPlanRemaining: number
   subscriptionId?: string
   subscriptionStatus?: string
   latestPlanName?: string
@@ -417,17 +423,34 @@ export async function getMemberSubscriptionFinancialSummary(memberId: string): P
   const remaining = Math.round(totalAmount - (totalPaid + totalDiscount))
   const isPaidFull = remaining <= 1 // ₹1 tolerance
 
-  // 4. Get latest subscription for the name snapshot in the member list
   const latestSubscription = activeSubscription || await prisma.subscription.findFirst({
-    where: { memberId },
+    where: { memberId, status: { not: "CANCELLED" } },
     orderBy: { createdAt: 'desc' }
   })
+
+  const currentTargetSubId = activeSubscription?.id || latestSubscription?.id
+  const currentPlanAmount = latestSubscription?.planPriceSnapshot || 0
+  const currentPlanPaymentSummary = currentTargetSubId
+    ? await prisma.payment.aggregate({
+        where: { memberId, subscriptionId: currentTargetSubId, status: "SUCCESS" },
+        _sum: { finalAmount: true, discountAmount: true },
+      })
+    : { _sum: { finalAmount: 0, discountAmount: 0 } as { finalAmount: number; discountAmount: number } }
+  const currentPlanPaid = currentPlanPaymentSummary._sum.finalAmount || 0
+  const currentPlanDiscount = currentPlanPaymentSummary._sum.discountAmount || 0
+  const currentPlanRemaining = Math.round(currentPlanAmount - (currentPlanPaid + currentPlanDiscount))
 
   return {
     totalAmount,
     totalPaid,
     remaining,
     isPaidFull,
+    globalTotalAmount: totalAmount,
+    globalTotalPaid: totalPaid,
+    globalRemaining: remaining,
+    currentPlanAmount,
+    currentPlanPaid,
+    currentPlanRemaining,
     subscriptionId: activeSubscription?.id,
     subscriptionStatus: activeSubscription?.status || "INACTIVE",
     latestPlanName: latestSubscription?.planNameSnapshot || "N/A"

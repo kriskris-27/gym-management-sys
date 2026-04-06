@@ -1,12 +1,17 @@
 import { prisma } from "./prisma"
 import { getMemberSubscriptionFinancialSummary } from "../domain/payment"
-import { getActiveSubscription } from "../domain/subscription"
 
 export interface MemberFinancials {
   totalAmount: number
   totalPaid: number
   remaining: number
   isPaidFull: boolean
+  globalTotalAmount: number
+  globalTotalPaid: number
+  globalRemaining: number
+  currentPlanAmount: number
+  currentPlanPaid: number
+  currentPlanRemaining: number
 }
 
 export interface MemberWithFinancials {
@@ -39,7 +44,13 @@ export async function computeMemberFinancials(memberId: string): Promise<MemberF
       totalAmount: financialSummary.totalAmount,
       totalPaid: financialSummary.totalPaid,
       remaining: financialSummary.remaining,
-      isPaidFull: financialSummary.isPaidFull
+      isPaidFull: financialSummary.isPaidFull,
+      globalTotalAmount: financialSummary.globalTotalAmount,
+      globalTotalPaid: financialSummary.globalTotalPaid,
+      globalRemaining: financialSummary.globalRemaining,
+      currentPlanAmount: financialSummary.currentPlanAmount,
+      currentPlanPaid: financialSummary.currentPlanPaid,
+      currentPlanRemaining: financialSummary.currentPlanRemaining,
     }
   } catch (error) {
     console.error(`[Financial Service] Error computing financials for member: ${memberId}`, error)
@@ -92,7 +103,13 @@ export async function computeMultipleMembersFinancials(memberIds: string[]): Pro
       totalAmount: 0,
       totalPaid: 0,
       remaining: 0,
-      isPaidFull: true
+      isPaidFull: true,
+      globalTotalAmount: 0,
+      globalTotalPaid: 0,
+      globalRemaining: 0,
+      currentPlanAmount: 0,
+      currentPlanPaid: 0,
+      currentPlanRemaining: 0,
     })
   })
 
@@ -100,12 +117,16 @@ export async function computeMultipleMembersFinancials(memberIds: string[]): Pro
   subscriptions.forEach(sub => {
     const data = financialsMap.get(sub.memberId)!
     data.totalAmount = sub._sum.planPriceSnapshot || 0
+    data.globalTotalAmount = data.totalAmount
+    data.currentPlanAmount = data.totalAmount
   })
 
   // Merge Payments and compute final state
   payments.forEach(pay => {
     const data = financialsMap.get(pay.memberId)!
     data.totalPaid = pay._sum.finalAmount || 0
+    data.globalTotalPaid = data.totalPaid
+    data.currentPlanPaid = data.totalPaid
     // Internal tracking for discount
     ;(data as any).totalDiscount = pay._sum.discountAmount || 0
   })
@@ -114,6 +135,8 @@ export async function computeMultipleMembersFinancials(memberIds: string[]): Pro
   financialsMap.forEach((data) => {
     const disc = (data as any).totalDiscount || 0
     data.remaining = Math.round(data.totalAmount - (data.totalPaid + disc))
+    data.globalRemaining = data.remaining
+    data.currentPlanRemaining = data.remaining
     data.isPaidFull = data.remaining <= 1 // ₹1 tolerance consistent with domain
   })
 
@@ -144,7 +167,13 @@ export async function attachFinancialsToMembers(members: {
         totalAmount: 0,
         totalPaid: 0,
         remaining: 0,
-        isPaidFull: false
+        isPaidFull: false,
+        globalTotalAmount: 0,
+        globalTotalPaid: 0,
+        globalRemaining: 0,
+        currentPlanAmount: 0,
+        currentPlanPaid: 0,
+        currentPlanRemaining: 0,
       }
     }
     return {

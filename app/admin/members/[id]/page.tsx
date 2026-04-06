@@ -9,15 +9,23 @@ import { z } from "zod"
 import { useMember } from "@/hooks/useMembers"
 import { usePayments, usePaymentSummary } from "@/hooks/usePayments"
 import { useMemberAttendance } from "@/hooks/useAttendance"
+import {
+  formatMemberDate,
+  formatMemberTime,
+  getMembershipDayInfo,
+} from "@/lib/gym-datetime"
 
 interface Member {
   id: string
   name: string
   phone: string
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
-  startDate: string
-  endDate: string
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS" | "NONE"
+  startDate: string | null
+  endDate: string | null
   status: "ACTIVE" | "INACTIVE" | "DELETED"
+  subscriptionStatus?: string
+  planUiState?: "LIVE" | "CANCELLED" | "EXPIRED" | "NEEDS_PLAN"
+  futurePlansCount?: number
   createdAt: string
 }
 
@@ -150,6 +158,7 @@ export default function MemberProfilePage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showRenewalModal, setShowRenewalModal] = useState(false)
+  const [renewalAction, setRenewalAction] = useState<"renew" | "switch">("renew")
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -403,7 +412,12 @@ export default function MemberProfilePage() {
   // Renewal Form Hook
   const [renewalSuccess, setRenewalSuccess] = useState(false)
   const { register: regRenewal, handleSubmit: handleRenewalSubmit, reset: resetRenewal, watch: watchRenewal, setValue: setRenewalValue, formState: { errors: renewalErrors, isSubmitting: isRenewing } } = useForm<RenewalFormData>({
-    defaultValues: { membershipType: member?.membershipType || "MONTHLY", startDate: getTodayStr(), customPrice: undefined }
+    defaultValues: {
+      membershipType:
+        member?.membershipType && member.membershipType !== "NONE" ? member.membershipType : "MONTHLY",
+      startDate: getTodayStr(),
+      customPrice: undefined,
+    },
   })
   const renewalMembershipType = watchRenewal("membershipType")
   const renewalStartDate = watchRenewal("startDate")
@@ -425,20 +439,26 @@ export default function MemberProfilePage() {
   useEffect(() => {
     if (member && showRenewalModal) {
       setCalculatedEndDate("")
+      const toYmd = (d: string | Date | null | undefined) => {
+        if (!d) return getTodayStr()
+        if (typeof d === "string") return d.includes("T") ? d.split("T")[0] : d.split(" ")[0]
+        return d.toISOString().split("T")[0]
+      }
       resetRenewal({
-        membershipType: member.membershipType,
-        startDate: getTodayStr(),
-        customPrice: undefined
+        membershipType:
+          member.membershipType && member.membershipType !== "NONE" ? member.membershipType : "MONTHLY",
+        startDate: renewalAction === "switch" ? toYmd(member.startDate) : toYmd(member.endDate),
+        customPrice: undefined,
       })
     }
-  }, [member, showRenewalModal, resetRenewal])
+  }, [member, showRenewalModal, renewalAction, resetRenewal])
 
   const onRenewalSubmit = async (data: RenewalFormData) => {
     try {
       setRenewError("")
       setRenewLoading(true)
       const payload: RenewalPayload = {
-        action: "renew",
+        action: renewalAction,
         membershipType: data.membershipType,
         startDate: data.startDate,
         customPrice: data.customPrice ? Number(data.customPrice) : undefined,
@@ -486,14 +506,7 @@ export default function MemberProfilePage() {
       case "OTHERS": return "Others"; default: return plan;
     }
   }
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return "-";
-    const datePart = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr.split(" ")[0];
-    const [year, month, day] = datePart.split("-");
-    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`;
-  }
-  const formatTime = (isoStr: string) => new Date(isoStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+  const formatPaymentDate = (dateStr: string) => formatMemberDate(dateStr)
 
 
   if (loading) {
@@ -516,17 +529,26 @@ export default function MemberProfilePage() {
     )
   }
 
-  const now = new Date()
-  const isExpired = member.endDate ? (() => {
-    const end = new Date(member.endDate)
-    // Set to end of day to avoid premature expiry
-    const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999)
-    return endDay < now
-  })() : false
+  const endInfo = getMembershipDayInfo(member.endDate)
 
-  const hasNoPlan = !member.endDate || member.membershipType === "NONE"
-  const daysLeft = member.endDate ? Math.ceil((new Date(member.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : 0
-  const isExpiringSoon = !isExpired && daysLeft >= 0 && daysLeft <= 7
+  const planUiState =
+    member.planUiState ??
+    (member.subscriptionStatus === "ACTIVE" && member.endDate && !endInfo.isPastEnd
+      ? "LIVE"
+      : member.subscriptionStatus === "CANCELLED"
+        ? "CANCELLED"
+        : member.subscriptionStatus === "EXPIRED" || (member.endDate && endInfo.isPastEnd)
+          ? "EXPIRED"
+          : "NEEDS_PLAN")
+
+  const isLivePlan = planUiState === "LIVE"
+  const isCancelledPlan = planUiState === "CANCELLED"
+  const isExpiredPlan = planUiState === "EXPIRED"
+  const needsPlan = planUiState === "NEEDS_PLAN"
+  const daysUntilEnd = endInfo.daysUntilEndInclusive
+  const daysSinceEnd = endInfo.daysSinceEnd
+  const isExpiringSoon =
+    isLivePlan && !endInfo.isPastEnd && daysUntilEnd >= 0 && daysUntilEnd <= 7
 
   const initial = member.name?.charAt(0).toUpperCase() || "?"
 
@@ -553,19 +575,7 @@ export default function MemberProfilePage() {
           <span>←</span> Members
         </button>
         <div className="flex gap-2 items-center">
-          {/* RENEW / SWITCH BUTTON - Always show for non-deleted members to allow STACKING */}
-          {member?.status !== "DELETED" && (
-            <button
-              onClick={() => {
-                setShowRenewalModal(true)
-                setDropdownOpen(false)
-              }}
-              className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] tracking-widest uppercase px-4 py-2.5 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
-            >
-              {member?.status === "ACTIVE" && !isExpired ? "Extend / Switch" : "Switch / Renew"}
-            </button>
-          )}
-          {member?.status === "ACTIVE" && !isExpired && (
+          {isLivePlan && (
             <button
               onClick={() => setShowCancelModal(true)}
               className="bg-transparent border border-[#D11F00]/30 text-[#D11F00] hover:bg-[#D11F00]/10 text-[12px] font-bold tracking-widest uppercase px-5 py-2.5 rounded-lg transition-all cursor-pointer"
@@ -589,25 +599,49 @@ export default function MemberProfilePage() {
       </div>
 
 
-      {/* NO ACTIVE PLAN BANNER */}
-      {(member?.status === "INACTIVE" || isExpired || hasNoPlan || member?.subscriptionStatus !== "ACTIVE") && (
+      {/* NO LIVE PLAN BANNER — Renew vs Switch is exclusive by planUiState */}
+      {!isLivePlan && (
         <div className="bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-xl px-5 py-4 mb-4 flex justify-between items-center animate-fade">
           <div>
             <p className="text-[#F59E0B] font-bold text-[14px]">
-              {isExpired ? "⚠ Membership Expired" : "⚠ No Active Membership"}
+              {isCancelledPlan
+                ? "⚠ Plan Cancelled"
+                : isExpiredPlan && endInfo.isPastEnd
+                  ? "⚠ Membership Expired"
+                  : "⚠ No Active Membership"}
             </p>
             <p className="text-[#888888] text-[12px] mt-0.5">
-              {member?.subscriptionStatus === "CANCELLED" ? "Last plan was cancelled. Switch to new plan." : 
-               isExpired ? `Expired on ${formatDate(member.endDate)}` : 
-               "Member needs a plan assignment to record attendance."}
+              {isCancelledPlan
+                ? "Use Switch Plan to upgrade or change — previous payments count toward the global balance."
+                : isExpiredPlan && endInfo.isPastEnd
+                  ? `Expired on ${formatMemberDate(member.endDate)}`
+                  : "Member needs a plan assignment to record attendance."}
             </p>
           </div>
-          <button
-            onClick={() => setShowRenewalModal(true)}
-            className="bg-[#F59E0B] hover:bg-[#D97706] text-black font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
-          >
-            Switch Plan →
-          </button>
+          <div className="flex gap-2">
+            {isCancelledPlan && (
+              <button
+                onClick={() => {
+                  setRenewalAction("switch")
+                  setShowRenewalModal(true)
+                }}
+                className="bg-[#F59E0B] hover:bg-[#D97706] text-black font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
+              >
+                Switch Plan
+              </button>
+            )}
+            {((isExpiredPlan && endInfo.isPastEnd) || needsPlan) && (
+              <button
+                onClick={() => {
+                  setRenewalAction("renew")
+                  setShowRenewalModal(true)
+                }}
+                className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
+              >
+                Renew Plan
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -616,7 +650,7 @@ export default function MemberProfilePage() {
       <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 flex flex-col md:flex-row gap-6 items-start animate-fade">
         <div className={`
           w-16 h-16 shrink-0 flex items-center justify-center rounded-full bg-[#1C1C1C]
-          ${isExpired ? "border-2 border-[#D11F00]" : isExpiringSoon ? "border-2 border-[#FF6B00]" : ""}
+          ${(isExpiredPlan && endInfo.isPastEnd) || (needsPlan && endInfo.isPastEnd) ? "border-2 border-[#D11F00]" : isCancelledPlan ? "border-2 border-[#F59E0B]" : isExpiringSoon ? "border-2 border-[#FF6B00]" : ""}
         `}>
           <span className="text-white text-[24px] font-black">{initial}</span>
         </div>
@@ -626,11 +660,6 @@ export default function MemberProfilePage() {
             <h1 className="text-white text-[24px] font-black leading-tight tracking-tight">{member.name}</h1>
             <div className="flex items-center gap-3 mt-1">
               <p className="text-[#444444] text-[13px] font-medium">{member.phone}</p>
-              {member.futurePlansCount > 0 && (
-                <span className="bg-[#10B981]/10 text-[#10B981] text-[10px] px-2 py-0.5 rounded-full border border-[#10B981]/20 font-bold uppercase tracking-wider">
-                  +{member.futurePlansCount} Future {member.futurePlansCount === 1 ? 'Plan' : 'Plans'} Queued
-                </span>
-              )}
             </div>
           </div>
 
@@ -641,29 +670,41 @@ export default function MemberProfilePage() {
             </div>
             <div>
               <p className="text-[#333333] text-[10px] tracking-widest uppercase font-bold mb-1.5">Status</p>
-              {isExpired ? (
-                <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">Expired</span>
-              ) : member.status === "ACTIVE" ? (
+              {isLivePlan ? (
                 <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">Active</span>
+              ) : isCancelledPlan ? (
+                <span className="inline-block bg-[#F59E0B]/10 text-[#F59E0B] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#F59E0B]/20">Cancelled</span>
+              ) : (isExpiredPlan && endInfo.isPastEnd) || (needsPlan && endInfo.isPastEnd) ? (
+                <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">Expired</span>
               ) : (
                 <span className="inline-block bg-[#1C1C1C] text-[#555555] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#2A2A2A]">Inactive</span>
               )}
             </div>
             <div>
               <p className="text-[#333333] text-[10px] tracking-widest uppercase font-bold mb-1.5">Joined</p>
-              <p className="text-white text-[13px] font-medium">{formatDate(member.startDate)}</p>
+              <p className="text-white text-[13px] font-medium">{formatMemberDate(member.startDate)}</p>
             </div>
             <div>
               <p className="text-[#333333] text-[10px] tracking-widest uppercase font-bold mb-1.5">Expires</p>
               <div className="flex flex-col">
-                <span className="text-white text-[13px] font-medium">{formatDate(member.endDate)}</span>
-                {isExpired ? (
-                  <span className="text-[#D11F00] text-[12px] font-medium mt-0.5 leading-tight tracking-wide">Expired {Math.abs(daysLeft)} days ago</span>
-                ) : daysLeft <= 7 ? (
-                  <span className="text-[#FF6B00] text-[12px] font-medium mt-0.5 leading-tight tracking-wide">{daysLeft} days remaining — expiring soon!</span>
-                ) : (
-                  <span className="text-[#10B981] text-[12px] font-medium mt-0.5 leading-tight tracking-wide">{daysLeft} days remaining</span>
-                )}
+                <span className="text-white text-[13px] font-medium">{formatMemberDate(member.endDate)}</span>
+                {endInfo.isPastEnd ? (
+                  <span className="text-[#D11F00] text-[12px] font-medium mt-0.5 leading-tight tracking-wide">
+                    Expired {daysSinceEnd} day{daysSinceEnd === 1 ? "" : "s"} ago
+                  </span>
+                ) : isCancelledPlan && member.endDate && daysUntilEnd > 0 ? (
+                  <span className="text-[#F59E0B] text-[12px] font-medium mt-0.5 leading-tight tracking-wide">
+                    {daysUntilEnd} day{daysUntilEnd === 1 ? "" : "s"} left on cancelled plan
+                  </span>
+                ) : isLivePlan && daysUntilEnd <= 7 ? (
+                  <span className="text-[#FF6B00] text-[12px] font-medium mt-0.5 leading-tight tracking-wide">
+                    {daysUntilEnd} day{daysUntilEnd === 1 ? "" : "s"} remaining — expiring soon!
+                  </span>
+                ) : isLivePlan ? (
+                  <span className="text-[#10B981] text-[12px] font-medium mt-0.5 leading-tight tracking-wide">
+                    {daysUntilEnd} day{daysUntilEnd === 1 ? "" : "s"} remaining
+                  </span>
+                ) : null}
               </div>
             </div>
             <div>
@@ -673,7 +714,7 @@ export default function MemberProfilePage() {
             <div>
               <p className="text-[#333333] text-[10px] tracking-widest uppercase font-bold mb-1.5">Last Visit</p>
               <p className="text-white text-[13px] font-medium">
-                {attendance.records[0] ? formatDate(attendance.records[0].checkedInAt) : "Never"}
+                {attendance.records[0] ? formatMemberDate(attendance.records[0].checkedInAt) : "Never"}
               </p>
             </div>
           </div>
@@ -696,13 +737,13 @@ export default function MemberProfilePage() {
         <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-3 gap-4 animate-fade z-10 relative">
           {/* CELL 1 */}
           <div className="border-r border-[#1C1C1C] pr-4">
-            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Due Amount</p>
+            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Global Due Amount</p>
             {paymentSummary.totalAmount === 0 ? (
               <p className="text-white text-[24px] font-black">Free Plan</p>
             ) : (
               <p className="text-white text-[24px] font-black">₹{paymentSummary.totalAmount.toLocaleString('en-IN')}</p>
             )}
-            <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">for {formatPlan(member.membershipType)} plan</p>
+            <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">lifetime ledger across all non-cancelled plans</p>
           </div>
           
           {/* CELL 2 */}
@@ -720,7 +761,7 @@ export default function MemberProfilePage() {
           
           {/* CELL 3 */}
           <div className="pl-4">
-            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Remaining</p>
+            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Global Remaining</p>
             {paymentSummary.remaining > 0 ? (
               <p className="text-[#D11F00] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹{paymentSummary.remaining.toLocaleString('en-IN')}</p>
             ) : paymentSummary.remaining === 0 ? (
@@ -792,13 +833,13 @@ export default function MemberProfilePage() {
                     return (
                       <tr key={record.id} className="border-b border-[#0D0D0D] hover:bg-[#0D0D0D] transition-colors">
                         <td className="px-5 py-4 text-white text-[13px] font-medium whitespace-nowrap">
-                          {formatDate(record.checkedInAt)}
+                          {formatMemberDate(record.checkedInAt)}
                         </td>
                         <td className="px-5 py-4 text-[#666666] text-[12px] whitespace-nowrap">
-                          {formatTime(record.checkedInAt)}
+                          {formatMemberTime(record.checkedInAt)}
                         </td>
                         <td className="px-5 py-4 text-[#666666] text-[12px] whitespace-nowrap">
-                          {record.checkedOutAt ? formatTime(record.checkedOutAt) : "-"}
+                          {record.checkedOutAt ? formatMemberTime(record.checkedOutAt) : "-"}
                         </td>
                         <td className="px-5 py-4 whitespace-nowrap">
                           {isOngoing ? (
@@ -883,7 +924,7 @@ export default function MemberProfilePage() {
                       return (
                         <tr key={pay.id} className="border-b border-[#0D0D0D] hover:bg-[#0D0D0D] transition-colors">
                           <td className="px-6 py-4 text-white text-[13px] font-medium whitespace-nowrap">
-                            {formatDate(pay.date)}
+                            {formatPaymentDate(pay.date)}
                           </td>
                           <td className="px-6 py-4 text-white font-bold whitespace-nowrap">
                             ₹{pay.amount.toLocaleString('en-IN')}
@@ -1065,7 +1106,7 @@ export default function MemberProfilePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setShowRenewalModal(false)} />
           <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[440px] w-full relative z-10 animate-modal shadow-2xl shadow-black/50 overflow-y-auto max-h-[90vh]">
-            <h2 className="text-white text-[20px] font-black tracking-tight">Renew Membership</h2>
+            <h2 className="text-white text-[20px] font-black tracking-tight">{renewalAction === "switch" ? "Switch Plan" : "Renew Membership"}</h2>
             <p className="text-[#666666] text-[13px] mt-1 mb-6">{member.name}</p>
             
             <form onSubmit={handleRenewalSubmit(onRenewalSubmit)} className="space-y-5">
@@ -1095,11 +1136,19 @@ export default function MemberProfilePage() {
               )}
 
               <div>
-                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Start Date</label>
+                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">
+                  Start Date{" "}
+                  <span className="text-[#10B981] ml-1 font-normal normal-case">
+                    {renewalAction === "switch"
+                      ? "(Server uses original start of cancelled plan)"
+                      : "(≤28 days after last expiry → aligns to that date; else today)"}
+                  </span>
+                </label>
                 <input
                   {...regRenewal("startDate")}
                   type="date"
-                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-3 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 [color-scheme:dark] cursor-pointer"
+                  disabled
+                  className="w-full bg-[#0F0F0F] border border-[#242424] text-[#555555] text-[14px] rounded-lg px-3 py-3 opacity-50 cursor-not-allowed [color-scheme:dark]"
                 />
               </div>
 
@@ -1165,7 +1214,7 @@ export default function MemberProfilePage() {
                     ${(isRenewing && !renewalSuccess) ? "opacity-70 cursor-not-allowed" : ""}
                   `}
                 >
-                  {renewalSuccess ? "Renewed ✓" : "Renew"}
+                  {renewalSuccess ? (renewalAction === "switch" ? "Switched ✓" : "Renewed ✓") : (renewalAction === "switch" ? "Switch" : "Renew")}
                 </button>
               </div>
             </form>

@@ -14,13 +14,13 @@ const schema = z.object({
   membershipType: z.enum([
     "MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "OTHERS"
   ]),
-  discountAmount: z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high"),
-  paidAmount: z.number().min(0, "Amount cannot be negative").max(99999, "Amount too high"),
+  discountAmount: z.coerce.number().min(0, "Discount cannot be negative").max(99999, "Discount too high"),
+  paidAmount: z.coerce.number().min(0, "Amount cannot be negative").max(99999, "Amount too high"),
   paymentMode: z.enum(["CASH", "UPI", "CARD"]),
   startDate: z.string().min(1, "Start date required"),
   endDate: z.string().optional(),
   manualPlanName: z.string().optional(),
-  manualAmount: z.number().optional(),
+  manualAmount: z.coerce.number().optional(),
 }).refine(data => {
   if (data.membershipType === "OTHERS") {
     return !!data.endDate && data.endDate.length > 0
@@ -52,7 +52,18 @@ interface PricingPlan {
   amount: number
 }
 
-type FormData = z.infer<typeof schema>
+interface FormData {
+  name: string
+  phone: string
+  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
+  discountAmount: number
+  paidAmount: number
+  paymentMode: "CASH" | "UPI" | "CARD"
+  startDate: string
+  endDate?: string
+  manualPlanName?: string
+  manualAmount?: number
+}
 
 export default function AddMemberPage() {
   const router = useRouter()
@@ -102,7 +113,7 @@ export default function AddMemberPage() {
     setError,
     formState: { errors }
   } = useForm<FormData>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema as any),
     defaultValues: {
       membershipType: "MONTHLY",
       discountAmount: 0,
@@ -202,6 +213,13 @@ export default function AddMemberPage() {
     }
   }
 
+  // Debug unseen errors
+  useEffect(() => {
+    if (Object.keys(errors).length > 0) {
+      console.log("Form validation errors preventing submit:", errors);
+    }
+  }, [errors]);
+
   return (
     <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 flex flex-col items-start overflow-x-hidden">
       <style>{`
@@ -236,7 +254,7 @@ export default function AddMemberPage() {
 
       {/* FORM CARD */}
       <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-8 w-full max-w-[560px] animate-fadeUp opacity-0 [animation-delay:0.1s]">
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        <form onSubmit={handleSubmit(onSubmit as any)} className="space-y-6">
           
           {/* FIELD 1: Full Name */}
           <div>
@@ -381,6 +399,9 @@ export default function AddMemberPage() {
                 placeholder="0"
                 className={`w-full bg-[#0F0F0F]/80 backdrop-blur-md border ${errors.paidAmount ? 'border-[#D11F00]' : 'border-[#242424]'} text-[18px] font-black text-[#D11F00] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:outline-none transition-all placeholder:text-[#222222]`}
               />
+              {errors.paidAmount && (
+                <p className="text-[#D11F00] text-[11px] mt-1.5 animate-error px-1">{errors.paidAmount.message}</p>
+              )}
               <div className="flex justify-between items-center px-1">
                 <p className="text-[#444444] text-[10px] italic font-medium">Balance Due: ₹{Math.max(0, finalAmount - (watch("paidAmount") || 0))}</p>
                 <button 

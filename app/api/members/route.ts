@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { MemberCreateSchema } from "@/lib/validations"
+import { syncMemberOperationalStatus } from "@/domain/subscription"
 
 /**
  * GET: List all members with filtering and search
@@ -95,7 +96,8 @@ export async function POST(request: Request) {
           name: data.name,
           phone: data.phone,
           phoneNormalized: data.phone.replace(/\D/g, ''), 
-          status: data.status || "ACTIVE",
+          // Status is synced from live subscription coverage after writes.
+          status: "INACTIVE",
         },
         select: {
           id: true,
@@ -192,6 +194,7 @@ export async function POST(request: Request) {
           }
         })
 
+        await syncMemberOperationalStatus(newMember.id, tx)
 
       } else {
          // Audit log for plain member
@@ -203,6 +206,7 @@ export async function POST(request: Request) {
             after: { name: newMember.name }
           }
         })
+        await syncMemberOperationalStatus(newMember.id, tx)
       }
 
       return newMember

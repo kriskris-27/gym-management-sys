@@ -1,4 +1,9 @@
 import { prisma } from "../lib/prisma"
+import { isMembershipEndPast, subscriptionWindowCoversNow } from "../lib/gym-datetime"
+import type { Prisma } from "@prisma/client"
+
+type DbClient = typeof prisma | Prisma.TransactionClient
+type MemberStatus = "ACTIVE" | "INACTIVE" | "DELETED"
 
 export interface Subscription {
   id: string
@@ -25,31 +30,100 @@ export interface Plan {
  * Get the currently active subscription for a member
  * BUSINESS RULE: Only ONE active subscription per member
  */
+export async function findLiveSubscription(
+  memberId: string,
+  db: DbClient = prisma
+): Promise<Subscription | null> {
+  const candidates = await db.subscription.findMany({
+    where: { memberId, status: "ACTIVE" },
+    orderBy: { createdAt: "desc" },
+    take: 24,
+  })
+
+  const subscription = candidates.find((s) =>
+    subscriptionWindowCoversNow(s.startDate, s.endDate)
+  )
+
+  return subscription || null
+}
+
+/**
+ * Sync member operational status from live subscription coverage.
+ * DELETED is preserved and never auto-changed.
+ */
+export async function syncMemberOperationalStatus(
+  memberId: string,
+  db: DbClient = prisma
+): Promise<MemberStatus> {
+  const member = await db.member.findUnique({
+    where: { id: memberId },
+    select: { status: true },
+  })
+
+  if (!member) {
+    throw new Error("Member not found")
+  }
+
+  if (member.status === "DELETED") {
+    return "DELETED"
+  }
+
+  const liveSub = await findLiveSubscription(memberId, db)
+  const nextStatus: MemberStatus = liveSub ? "ACTIVE" : "INACTIVE"
+
+  if (member.status !== nextStatus) {
+    await db.member.update({
+      where: { id: memberId },
+      data: { status: nextStatus },
+    })
+  }
+
+  return nextStatus
+}
+
+/**
+ * Reconcile stale ACTIVE rows whose end-day has passed in IST.
+ */
+export async function reconcileExpiredSubscriptions(
+  db: DbClient = prisma
+): Promise<{ examined: number; expired: number; memberIds: string[] }> {
+  const activeSubs = await db.subscription.findMany({
+    where: { status: "ACTIVE" },
+    select: { id: true, memberId: true, endDate: true },
+    orderBy: { createdAt: "desc" },
+    take: 5000,
+  })
+
+  const expiredIds = activeSubs.filter((s) => isMembershipEndPast(s.endDate)).map((s) => s.id)
+  const memberIds = Array.from(
+    new Set(activeSubs.filter((s) => expiredIds.includes(s.id)).map((s) => s.memberId))
+  )
+
+  if (expiredIds.length > 0) {
+    await db.subscription.updateMany({
+      where: { id: { in: expiredIds } },
+      data: { status: "EXPIRED" },
+    })
+  }
+
+  return {
+    examined: activeSubs.length,
+    expired: expiredIds.length,
+    memberIds,
+  }
+}
+
 export async function getActiveSubscription(memberId: string): Promise<Subscription | null> {
   console.log(`[Subscription Domain] Getting active subscription for member: ${memberId}`)
-  
-  const subscription = await prisma.subscription.findFirst({
-    where: {
-      memberId,
-      status: 'ACTIVE',
-      // Ensure subscription is within valid date range
-      startDate: { lte: new Date() },
-      endDate: { gte: new Date() }
-    },
-    include: {
-      plan: true
-    },
-    orderBy: {
-      createdAt: 'desc' // Get the most recent active subscription
-    }
-  })
+
+  const subscription = await findLiveSubscription(memberId)
 
   if (!subscription) {
     console.log(`[Subscription Domain] No active subscription found for member: ${memberId}`)
     return null
   }
 
-  console.log(`[Subscription Domain] Found active subscription: ${subscription.id}, Plan: ${subscription.plan.name}`)
+  console.log(`[Subscription Domain] Found active subscription: ${subscription.id}`)
   return subscription
 }
 

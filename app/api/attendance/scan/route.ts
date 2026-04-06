@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { scanMember } from "../../../../temp/domain/attendance"
+import { scanMember } from "@/domain/attendance"
 import { AttendanceScanSchema } from "../../../../lib/validations"
 
 const rateLimitMap = new Map<string, { count: number; start: number }>()

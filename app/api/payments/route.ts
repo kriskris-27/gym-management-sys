@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { PaymentCreateSchema } from "@/lib/validations"
+import { findLiveSubscription } from "@/domain/subscription"
 
 /**
  * GET: Retrieve payments list with optional filtering
@@ -115,20 +116,14 @@ export async function POST(request: Request) {
     // 1. Verify Member is Valid
     const member = await prisma.member.findUnique({
       where: { id: data.memberId },
-      include: {
-        subscriptions: {
-          where: { status: "ACTIVE" },
-          take: 1,
-          orderBy: { createdAt: "desc" }
-        }
-      }
+      select: { id: true, name: true, status: true }
     })
 
     if (!member || member.status === "DELETED") {
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
 
-    const activeSub = member.subscriptions[0] || null
+    const activeSub = await findLiveSubscription(data.memberId)
     const baseAmount = activeSub ? activeSub.planPriceSnapshot : data.amount
 
     // 2. Insert into Ledger
