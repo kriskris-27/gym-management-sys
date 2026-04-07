@@ -30,8 +30,11 @@ export function useCreateMember() {
       })
 
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || "Failed to create member")
+        const error = await response.json().catch(() => ({}))
+        const message = typeof error.error === "string" ? error.error : "Failed to create member"
+        const err = new Error(message) as Error & { code?: string }
+        if (typeof error.code === "string") err.code = error.code
+        throw err
       }
 
       return response.json() as Promise<{ member: Member }>

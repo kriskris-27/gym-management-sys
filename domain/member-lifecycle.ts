@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma"
 import type { PaymentMethod, Prisma } from "@prisma/client"
+import { computeGlobalMemberLedger } from "./payment"
 import { findLiveSubscription, syncMemberOperationalStatus } from "./subscription"
 import { fromDate, nowUTC } from "@/lib/utils"
 
@@ -7,11 +8,14 @@ type Tx = Prisma.TransactionClient
 type MemberAction = "renew" | "switch"
 
 export class MemberLifecycleError extends Error {
-  status: number
+  readonly status: number
+  readonly code: string
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string = "LIFECYCLE_ERROR") {
     super(message)
+    this.name = "MemberLifecycleError"
     this.status = status
+    this.code = code
   }
 }
 
@@ -27,8 +31,10 @@ type RenewSwitchPayload = {
 
 export async function restoreMember(memberId: string) {
   const member = await prisma.member.findUnique({ where: { id: memberId } })
-  if (!member) throw new MemberLifecycleError(404, "Member not found")
-  if (member.status !== "DELETED") throw new MemberLifecycleError(400, "Member not is not deleted")
+  if (!member) throw new MemberLifecycleError(404, "Member not found", "NOT_FOUND")
+  if (member.status !== "DELETED") {
+    throw new MemberLifecycleError(400, "Member is not deleted", "NOT_DELETED")
+  }
 
   const restored = await prisma.member.update({
     where: { id: memberId },
@@ -40,7 +46,9 @@ export async function restoreMember(memberId: string) {
 
 export async function cancelMemberPlan(memberId: string) {
   const activeSub = await findLiveSubscription(memberId)
-  if (!activeSub) throw new MemberLifecycleError(400, "No active subscription to cancel")
+  if (!activeSub) {
+    throw new MemberLifecycleError(400, "No active subscription to cancel", "NO_ACTIVE_SUBSCRIPTION")
+  }
 
   await prisma.subscription.update({
     where: { id: activeSub.id },
@@ -69,10 +77,18 @@ async function validateActionPreconditions(memberId: string, action: MemberActio
 
   if (action === "renew") {
     if (latestForAction?.status === "CANCELLED") {
-      throw new MemberLifecycleError(400, "Member has a cancelled plan. Use Switch Plan instead of Renew.")
+      throw new MemberLifecycleError(
+        400,
+        "Member has a cancelled plan. Use Switch Plan instead of Renew.",
+        "RENEW_USE_SWITCH"
+      )
     }
     if (hasLivePlan) {
-      throw new MemberLifecycleError(400, "Member already has an active subscription. Cancel first if you need to change plans.")
+      throw new MemberLifecycleError(
+        400,
+        "Member already has an active subscription. Cancel first if you need to change plans.",
+        "ALREADY_HAS_LIVE_PLAN"
+      )
     }
   }
 
@@ -81,29 +97,26 @@ async function validateActionPreconditions(memberId: string, action: MemberActio
       where: { memberId, status: "CANCELLED" },
       orderBy: { createdAt: "desc" },
     })
-    if (!cancelledCheck) throw new MemberLifecycleError(400, "No cancelled plan to switch from.")
+    if (!cancelledCheck) {
+      throw new MemberLifecycleError(400, "No cancelled plan to switch from.", "NO_CANCELLED_PLAN")
+    }
     if (hasLivePlan) {
-      throw new MemberLifecycleError(400, "Member still has an active subscription period. Cancel it before switching.")
+      throw new MemberLifecycleError(
+        400,
+        "Member still has an active subscription period. Cancel it before switching.",
+        "STILL_HAS_LIVE_WINDOW"
+      )
     }
   }
 }
 
 async function applyRenewOutstandingGuard(tx: Tx, memberId: string) {
-  const subSummary = await tx.subscription.aggregate({
-    where: { memberId, status: { not: "CANCELLED" } },
-    _sum: { planPriceSnapshot: true },
-  })
-  const paySummary = await tx.payment.aggregate({
-    where: { memberId, status: "SUCCESS" },
-    _sum: { finalAmount: true, discountAmount: true },
-  })
-  const due = subSummary._sum.planPriceSnapshot || 0
-  const paid = (paySummary._sum.finalAmount || 0) + (paySummary._sum.discountAmount || 0)
-  const remaining = Math.round(due - paid)
+  const { remaining } = await computeGlobalMemberLedger(memberId, tx)
   if (remaining > 1) {
     throw new MemberLifecycleError(
       403,
-      `Cannot renew: Member has an outstanding balance of ₹${remaining}. Please clear previous dues first.`
+      `Cannot renew: Member has an outstanding balance of ₹${remaining}. Please clear previous dues first.`,
+      "OUTSTANDING_BALANCE"
     )
   }
 }
@@ -117,7 +130,7 @@ export async function renewOrSwitchMemberPlan(memberId: string, payload: RenewSw
       subscriptions: { orderBy: { createdAt: "desc" }, take: 1 },
     },
   })
-  if (!member) throw new MemberLifecycleError(404, "Member not found")
+  if (!member) throw new MemberLifecycleError(404, "Member not found", "NOT_FOUND")
 
   const subscription = await prisma.$transaction(async (tx) => {
     const nowIST = nowUTC()
@@ -177,7 +190,9 @@ export async function renewOrSwitchMemberPlan(memberId: string, payload: RenewSw
         data: { name: "OTHERS", price: 0, durationDays: 1, isActive: true },
       })
     }
-    if (!plan) throw new MemberLifecycleError(400, `Plan '${planLookup}' not found.`)
+    if (!plan) {
+      throw new MemberLifecycleError(400, `Plan '${planLookup}' not found.`, "PLAN_NOT_FOUND")
+    }
 
     const resolvedPlanName =
       payload.membershipType === "OTHERS" ? payload.manualPlanName || "Others" : plan.name

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { PaymentCreateSchema } from "@/lib/validations"
-import { findLiveSubscription } from "@/domain/subscription"
+import {
+  assertGlobalPaymentAllowed,
+  assertNoCurrentPlanOverpay,
+  computeGlobalMemberLedger,
+  getLivePlanPaymentRemaining,
+} from "@/domain/payment"
 
 /**
  * GET: Retrieve payments list with optional filtering
@@ -123,14 +128,59 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
     }
 
-    const activeSub = await findLiveSubscription(data.memberId)
-    const baseAmount = activeSub ? activeSub.planPriceSnapshot : data.amount
+    const globalLedger = await computeGlobalMemberLedger(data.memberId)
+    const globalGuard = assertGlobalPaymentAllowed({
+      amount: data.amount,
+      globalRemaining: globalLedger.remaining,
+    })
+    if (!globalGuard.ok) {
+      return NextResponse.json(
+        { error: globalGuard.message, code: globalGuard.code },
+        { status: globalGuard.code === "MEMBER_FULLY_PAID" ? 409 : 400 }
+      )
+    }
+
+    const liveLedger = await getLivePlanPaymentRemaining(data.memberId)
+    const payRounded = Math.round(data.amount)
+
+    let subscriptionId: string | null = null
+    let baseAmount = payRounded
+
+    if (
+      liveLedger.liveSubscriptionId &&
+      liveLedger.remaining > 1 &&
+      payRounded <= liveLedger.remaining + 1
+    ) {
+      const liveGuard = assertNoCurrentPlanOverpay({
+        amount: data.amount,
+        remaining: liveLedger.remaining,
+      })
+      if (!liveGuard.ok) {
+        return NextResponse.json(
+          { error: liveGuard.message, code: liveGuard.code },
+          { status: liveGuard.code === "CURRENT_PLAN_FULLY_PAID" ? 409 : 400 }
+        )
+      }
+      subscriptionId = liveLedger.liveSubscriptionId
+      baseAmount = liveLedger.planAmount
+    } else if (
+      liveLedger.liveSubscriptionId &&
+      liveLedger.remaining > 1 &&
+      payRounded > liveLedger.remaining + 1
+    ) {
+      // More than this plan's share: record against global ledger only (no sub link)
+      subscriptionId = null
+      baseAmount = payRounded
+    } else {
+      subscriptionId = null
+      baseAmount = payRounded
+    }
 
     // 2. Insert into Ledger
     const payment = await prisma.payment.create({
       data: {
         memberId: data.memberId,
-        subscriptionId: activeSub?.id || null,   
+        subscriptionId,
         baseAmount: baseAmount,                 // Use sub snapshot as base truth
         discountAmount: 0,
         finalAmount: data.amount,               // The actual cash/upi paid

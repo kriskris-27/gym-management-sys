@@ -1,5 +1,154 @@
+import type { Prisma } from "@prisma/client"
 import { prisma } from "../lib/prisma"
-import { getActiveSubscription } from "./subscription"
+import { findLiveSubscription, getActiveSubscription } from "./subscription"
+
+/** Prisma client or transaction — same aggregates for global ledger. */
+export type PaymentDb = typeof prisma | Prisma.TransactionClient
+
+/**
+ * Global ledger: sum(non-cancelled subscription planPriceSnapshot) vs SUCCESS payments + discounts.
+ * Used by financial summary UI and renew guard so rules cannot drift.
+ */
+export async function computeGlobalMemberLedger(
+  memberId: string,
+  db: PaymentDb = prisma
+): Promise<{
+  totalAmount: number
+  totalPaid: number
+  totalDiscount: number
+  remaining: number
+  isPaidFull: boolean
+}> {
+  const subSummary = await db.subscription.aggregate({
+    where: { memberId, status: { not: "CANCELLED" } },
+    _sum: { planPriceSnapshot: true },
+  })
+  const paySummary = await db.payment.aggregate({
+    where: { memberId, status: "SUCCESS" },
+    _sum: { finalAmount: true, discountAmount: true },
+  })
+  const totalAmount = subSummary._sum.planPriceSnapshot || 0
+  const totalPaid = paySummary._sum.finalAmount || 0
+  const totalDiscount = paySummary._sum.discountAmount || 0
+  const remaining = Math.round(totalAmount - (totalPaid + totalDiscount))
+  return {
+    totalAmount,
+    totalPaid,
+    totalDiscount,
+    remaining,
+    isPaidFull: remaining <= 1,
+  }
+}
+
+const RUPEE_ROUND_SLACK = 1
+
+/**
+ * Balance left on the **live** subscription (IST window covers today).
+ * Counts payments linked to that sub **plus** unallocated (`subscriptionId` null) cash,
+ * applying orphan payments to the uncovered part of this plan first — matches how global
+ * ledger sees money and fixes historical rows saved without `subscriptionId`.
+ */
+export async function getLivePlanPaymentRemaining(
+  memberId: string,
+  db: PaymentDb = prisma
+): Promise<{
+  liveSubscriptionId: string | null
+  planAmount: number
+  paidLinked: number
+  paidOrphanApplied: number
+  paid: number
+  remaining: number
+}> {
+  const live = await findLiveSubscription(memberId, db)
+  if (!live) {
+    return {
+      liveSubscriptionId: null,
+      planAmount: 0,
+      paidLinked: 0,
+      paidOrphanApplied: 0,
+      paid: 0,
+      remaining: 0,
+    }
+  }
+  const [linked, orphan] = await Promise.all([
+    db.payment.aggregate({
+      where: { memberId, subscriptionId: live.id, status: "SUCCESS" },
+      _sum: { finalAmount: true, discountAmount: true },
+    }),
+    db.payment.aggregate({
+      where: { memberId, subscriptionId: null, status: "SUCCESS" },
+      _sum: { finalAmount: true, discountAmount: true },
+    }),
+  ])
+  const paidLinked = Math.round(
+    (linked._sum.finalAmount || 0) + (linked._sum.discountAmount || 0)
+  )
+  const orphanTotal = Math.round(
+    (orphan._sum.finalAmount || 0) + (orphan._sum.discountAmount || 0)
+  )
+  const planAmount = Math.round(live.planPriceSnapshot)
+  const uncoveredByLinked = Math.max(0, planAmount - paidLinked)
+  const paidOrphanApplied = Math.min(orphanTotal, uncoveredByLinked)
+  const paid = paidLinked + paidOrphanApplied
+  const remaining = Math.max(0, planAmount - paid)
+  return {
+    liveSubscriptionId: live.id,
+    planAmount,
+    paidLinked,
+    paidOrphanApplied,
+    paid,
+    remaining,
+  }
+}
+
+/** Block any payment that would exceed total member liability (all non-cancelled subs). */
+export function assertGlobalPaymentAllowed(args: {
+  amount: number
+  globalRemaining: number
+}): { ok: true } | { ok: false; code: string; message: string } {
+  const pay = Math.round(args.amount)
+  const rem = args.globalRemaining
+  if (rem <= RUPEE_ROUND_SLACK && pay > 0) {
+    return {
+      ok: false,
+      code: "MEMBER_FULLY_PAID",
+      message:
+        "This member has no outstanding balance on the ledger. Remove or reduce the amount.",
+    }
+  }
+  if (pay > rem + RUPEE_ROUND_SLACK) {
+    return {
+      ok: false,
+      code: "OVERPAY_GLOBAL",
+      message: `Amount (₹${pay}) exceeds total remaining balance (₹${Math.max(0, rem)}).`,
+    }
+  }
+  return { ok: true }
+}
+
+export function assertNoCurrentPlanOverpay(args: {
+  amount: number
+  remaining: number
+}): { ok: true } | { ok: false; code: string; message: string } {
+  const pay = Math.round(args.amount)
+  const rem = args.remaining
+  if (rem <= RUPEE_ROUND_SLACK && pay > 0) {
+    return {
+      ok: false,
+      code: "CURRENT_PLAN_FULLY_PAID",
+      message:
+        "This membership is already fully paid. You cannot record another payment against the current plan.",
+    }
+  }
+  if (pay > rem + RUPEE_ROUND_SLACK) {
+    return {
+      ok: false,
+      code: "OVERPAY_CURRENT_PLAN",
+      message: `Amount (₹${pay}) is more than the balance for the current plan (₹${rem}).`,
+    }
+  }
+  return { ok: true }
+}
 
 // Import interfaces from subscription domain
 interface Subscription {
@@ -390,38 +539,11 @@ export async function getMemberSubscriptionFinancialSummary(memberId: string): P
   latestPlanName?: string
 }> {
   console.log(`[Payment Domain] Computing global balance for member: ${memberId}`)
-  
+
   // 1. Get Active Subscription (if any) for current status display
   const activeSubscription = await getActiveSubscription(memberId)
-  
-  // 2. Aggregate Total Revenue from ALL subscriptions
-  const subSummary = await prisma.subscription.aggregate({
-    where: { 
-      memberId,
-      status: { not: 'CANCELLED' } // Don't charge for cancelled subs
-    },
-    _sum: {
-      planPriceSnapshot: true
-    }
-  })
 
-  // 3. Aggregate Total Payments & Discounts from ALL history
-  const paySummary = await prisma.payment.aggregate({
-    where: {
-      memberId,
-      status: 'SUCCESS'
-    },
-    _sum: {
-      finalAmount: true,
-      discountAmount: true
-    }
-  })
-
-  const totalAmount = subSummary._sum.planPriceSnapshot || 0
-  const totalPaid = paySummary._sum.finalAmount || 0
-  const totalDiscount = paySummary._sum.discountAmount || 0
-  const remaining = Math.round(totalAmount - (totalPaid + totalDiscount))
-  const isPaidFull = remaining <= 1 // ₹1 tolerance
+  const { totalAmount, totalPaid, remaining, isPaidFull } = await computeGlobalMemberLedger(memberId)
 
   const latestSubscription = activeSubscription || await prisma.subscription.findFirst({
     where: { memberId, status: { not: "CANCELLED" } },

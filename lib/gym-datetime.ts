@@ -59,6 +59,36 @@ export function getMembershipDayInfo(end: Date | string | null | undefined): Mem
   return { isPastEnd: true, daysUntilEndInclusive: 0, daysSinceEnd: daysAgo }
 }
 
+/** Today's calendar date in the gym zone as `YYYY-MM-DD` (for date inputs). */
+export function todayYmdInIST(): string {
+  return DateTime.now().setZone(GYM_TIMEZONE).toFormat("yyyy-LL-dd")
+}
+
+/**
+ * Membership end instant: start of start-day in IST + `durationDays` calendar days (same rule as admin duration presets).
+ * Stored `Date` is UTC from that IST midnight boundary for stable comparisons with `subscriptionWindowCoversNow`.
+ */
+export function membershipEndDateFromStartAndDurationDaysIST(
+  start: Date,
+  durationDays: number
+): Date {
+  const startZ = toGymZoned(start)
+  if (!startZ || !startZ.isValid) {
+    const d = new Date(start)
+    d.setUTCDate(d.getUTCDate() + durationDays)
+    return d
+  }
+  return startZ.startOf("day").plus({ days: durationDays }).toUTC().toJSDate()
+}
+
+/** True if the membership start calendar day in IST is still strictly after "now" in IST. */
+export function isMembershipStartInFutureIST(start: Date): boolean {
+  const sz = toGymZoned(start)
+  if (!sz) return false
+  const now = DateTime.now().setZone(GYM_TIMEZONE)
+  return now < sz.startOf("day")
+}
+
 export function formatMemberDate(value: Date | string | null | undefined): string {
   if (value == null) return "-"
   const d = toGymZoned(value)

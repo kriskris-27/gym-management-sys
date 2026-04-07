@@ -1,74 +1,148 @@
 import { NextResponse } from "next/server"
+import type { MemberStatus, Prisma } from "@prisma/client"
 import prisma from "@/lib/prisma"
 import { MemberCreateSchema } from "@/lib/validations"
 import { syncMemberOperationalStatus } from "@/domain/subscription"
+import { membershipEndDateFromStartAndDurationDaysIST } from "@/lib/gym-datetime"
+
+class MemberCreateBizError extends Error {
+  readonly status: number
+  readonly code: string
+
+  constructor(status: number, code: string, message: string) {
+    super(message)
+    this.name = "MemberCreateBizError"
+    this.status = status
+    this.code = code
+  }
+}
 
 /**
  * GET: List all members with filtering and search
  */
+const ALLOWED_MEMBER_LIST_STATUSES = ["ACTIVE", "INACTIVE", "DELETED"] as const
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const search = searchParams.get("search")
     ?.trim()
     .slice(0, 100)
-  const status = searchParams.get("status")
+  const rawStatus = searchParams.get("status")
+  const status = (rawStatus ?? "").trim()
+  const limitParam = searchParams.get("limit")
+  const pageParam = searchParams.get("page")
 
   try {
-    const where: any = {}
+    if (
+      rawStatus !== null &&
+      status !== "" &&
+      !ALLOWED_MEMBER_LIST_STATUSES.includes(
+        status as (typeof ALLOWED_MEMBER_LIST_STATUSES)[number]
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error: "Invalid status. Use ACTIVE, INACTIVE, or DELETED.",
+          code: "INVALID_QUERY_STATUS",
+        },
+        { status: 400 }
+      )
+    }
 
-    // Status filtering (allow ACTIVE/INACTIVE/DELETED)
-    if (status && ["ACTIVE", "INACTIVE", "DELETED"].includes(status)) {
-      where.status = status as "ACTIVE" | "INACTIVE" | "DELETED"
-    } else if (!status) {
-      // Default: exclude DELETED members
+    const where: Prisma.MemberWhereInput = {}
+
+    if (
+      status &&
+      ALLOWED_MEMBER_LIST_STATUSES.includes(
+        status as (typeof ALLOWED_MEMBER_LIST_STATUSES)[number]
+      )
+    ) {
+      where.status = status as MemberStatus
+    } else {
       where.status = { not: "DELETED" }
     }
 
-    // Search by Name or Phone (case-insensitive)
     if (search) {
-      // Prisma handles 'contains' sanitization internally
       where.OR = [
         { name: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
       ]
     }
 
-    const members = await prisma.member.findMany({
-      where,
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        status: true,
-        createdAt: true,
-        lastCheckinAt: true,
-        updatedAt: true,
-        subscriptions: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            startDate: true,
-            endDate: true,
-            status: true,
-            planNameSnapshot: true,
-            planPriceSnapshot: true
-          }
-        }
-      },
-      orderBy: { createdAt: "desc" },
-    })
+    let skip: number | undefined
+    let take: number | undefined
+    if (limitParam !== null && limitParam !== "") {
+      const limitParsed = parseInt(limitParam, 10)
+      const limit =
+        Number.isFinite(limitParsed) && limitParsed > 0
+          ? Math.min(100, Math.floor(limitParsed))
+          : 50
+      const pageParsed = parseInt(pageParam ?? "1", 10)
+      const page =
+        Number.isFinite(pageParsed) && pageParsed > 0
+          ? Math.floor(pageParsed)
+          : 1
+      skip = (page - 1) * limit
+      take = limit
+    }
+
+    const [members, total] = await Promise.all([
+      prisma.member.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          status: true,
+          createdAt: true,
+          lastCheckinAt: true,
+          updatedAt: true,
+          subscriptions: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: {
+              startDate: true,
+              endDate: true,
+              status: true,
+              planNameSnapshot: true,
+              planPriceSnapshot: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        ...(skip !== undefined ? { skip, take } : {}),
+      }),
+      prisma.member.count({ where }),
+    ])
 
     const { attachFinancialsToMembers } = await import("@/lib/financial-service")
     const membersWithFinance = await attachFinancialsToMembers(members as any)
 
-    return NextResponse.json({ members: membersWithFinance }, {
+    const payload: {
+      members: typeof membersWithFinance
+      total: number
+      page?: number
+      limit?: number
+    } = { members: membersWithFinance, total }
+    if (take !== undefined && skip !== undefined) {
+      payload.page = Math.floor(skip / take) + 1
+      payload.limit = take
+    }
+
+    return NextResponse.json(payload, {
       headers: {
-        "Cache-Control": "s-maxage=60, stale-while-revalidate",
+        "Cache-Control": "private, no-store",
       },
     })
-
   } catch (error) {
-    return NextResponse.json({ error: "Could not retrieve members" }, { status: 500 })
+    console.error("❌ API ERROR [GET /api/members]:", error)
+    return NextResponse.json(
+      {
+        error: "Could not retrieve members",
+        code: "MEMBERS_LIST_FAILED",
+      },
+      { status: 500 }
+    )
   }
 }
 
@@ -77,14 +151,26 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
-    
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON body", code: "INVALID_JSON" },
+        { status: 400 }
+      )
+    }
+
     const validated = MemberCreateSchema.safeParse(body)
-    
+
     if (!validated.success) {
-      return NextResponse.json({ 
-        error: validated.error.issues[0].message 
-      }, { status: 400 })
+      return NextResponse.json(
+        {
+          error: validated.error.issues[0].message,
+          code: "VALIDATION",
+        },
+        { status: 400 }
+      )
     }
 
     const data = validated.data
@@ -95,8 +181,8 @@ export async function POST(request: Request) {
         data: {
           name: data.name,
           phone: data.phone,
-          phoneNormalized: data.phone.replace(/\D/g, ''), 
-          // Status is synced from live subscription coverage after writes.
+          phoneNormalized: data.phone.replace(/\D/g, ""),
+          // Synced from subscriptions after writes (never taken from request body).
           status: "INACTIVE",
         },
         select: {
@@ -110,125 +196,158 @@ export async function POST(request: Request) {
         },
       })
 
-      if (data.membershipType && data.startDate) {
-        // Fetch plan to get duration and base price
-        let plan = await tx.plan.findUnique({
-          where: { name: data.membershipType }
-        })
+      let plan = await tx.plan.findFirst({
+        where: { name: data.membershipType, isActive: true },
+      })
 
-        // Auto-bootstrap OTHERS plan if missing to prevent "Plan not found" errors
-        if (!plan && data.membershipType === "OTHERS") {
+      if (!plan) {
+        const byName = await tx.plan.findUnique({
+          where: { name: data.membershipType },
+        })
+        if (byName?.isActive === false) {
+          throw new MemberCreateBizError(
+            400,
+            "PLAN_INACTIVE",
+            `Plan "${data.membershipType}" is disabled. Enable it in pricing settings.`
+          )
+        }
+        if (data.membershipType === "OTHERS" && !byName) {
           plan = await tx.plan.create({
             data: {
               name: "OTHERS",
               price: 0,
-              durationDays: 1, // Default, manual plans use manual endDates anyway
-              isActive: true
-            }
+              durationDays: 1,
+              isActive: true,
+            },
           })
+        } else if (byName?.isActive) {
+          plan = byName
+        } else {
+          throw new MemberCreateBizError(
+            400,
+            "PLAN_NOT_FOUND",
+            `Plan "${data.membershipType}" not found. Configure pricing first.`
+          )
         }
-
-        // 2. Determine Plan Details
-        if (!plan) {
-          throw new Error(`Plan error: '${data.membershipType}' not found in database. Please configure pricing first.`)
-        }
-
-        let resolvedPlanName = plan.name;
-        let resolvedBasePrice = plan.price;
-        let resolvedEndDate = data.endDate;
-
-        if (data.membershipType === "OTHERS") {
-          resolvedPlanName = data.manualPlanName || "Others";
-          resolvedBasePrice = data.manualAmount || 0;
-        }
-
-        // Calculate end date server-side if it isn't explicitly provided
-        if (!resolvedEndDate) {
-          resolvedEndDate = new Date(data.startDate);
-          resolvedEndDate.setDate(resolvedEndDate.getDate() + plan.durationDays);
-        }
-
-        const discount = data.discountAmount || 0;
-        const finalPrice = Math.max(0, resolvedBasePrice - discount);
-
-        // 1. Create Subscription
-        const subscription = await tx.subscription.create({
-          data: {
-            memberId: newMember.id,
-            planId: plan.id,
-            startDate: data.startDate,
-            endDate: resolvedEndDate,
-            status: "ACTIVE",
-            planNameSnapshot: resolvedPlanName,
-            planPriceSnapshot: resolvedBasePrice,
-          }
-        })
-
-        // 2. Create Payment Record (Installment Support)
-        await tx.payment.create({
-          data: {
-            memberId: newMember.id,
-            subscriptionId: subscription.id,
-            baseAmount: resolvedBasePrice,
-            discountAmount: discount,
-            finalAmount: data.paidAmount ?? 0, // Default to 0 for new members unless specified
-            method: (data.paymentMode as any) || "CASH", 
-            status: "SUCCESS",
-            purpose: "SUBSCRIPTION"
-          }
-        })
-
-        // 3. Log Audit Event
-        await tx.auditLog.create({
-          data: {
-            entityType: "MEMBER",
-            entityId: newMember.id,
-            action: "CREATED_WITH_SUBSCRIPTION",
-            after: { 
-              name: newMember.name, 
-              plan: resolvedPlanName,
-              baseAmount: resolvedBasePrice,
-              discountAmount: discount,
-              finalAmount: finalPrice 
-            }
-          }
-        })
-
-        await syncMemberOperationalStatus(newMember.id, tx)
-
-      } else {
-         // Audit log for plain member
-         await tx.auditLog.create({
-          data: {
-            entityType: "MEMBER",
-            entityId: newMember.id,
-            action: "CREATED",
-            after: { name: newMember.name }
-          }
-        })
-        await syncMemberOperationalStatus(newMember.id, tx)
       }
+
+      let resolvedPlanName = plan.name
+      let resolvedBasePrice = plan.price
+      let resolvedEndDate: Date
+
+      if (data.membershipType === "OTHERS") {
+        resolvedPlanName = data.manualPlanName || "Others"
+        resolvedBasePrice = data.manualAmount ?? 0
+        if (!data.endDate) {
+          throw new MemberCreateBizError(
+            400,
+            "VALIDATION",
+            "Others membership requires an end date"
+          )
+        }
+        resolvedEndDate = data.endDate
+      } else {
+        // Server authority: standard plans always use catalog duration in IST (ignore client endDate).
+        resolvedEndDate = membershipEndDateFromStartAndDurationDaysIST(
+          data.startDate,
+          plan.durationDays
+        )
+      }
+
+      const discount = Math.round(data.discountAmount ?? 0)
+      const paid = Math.round(data.paidAmount ?? 0)
+      const base = Math.round(resolvedBasePrice)
+
+      if (discount > base) {
+        throw new MemberCreateBizError(
+          400,
+          "DISCOUNT_EXCEEDS_BASE",
+          `Discount (₹${discount}) cannot exceed base price (₹${base}).`
+        )
+      }
+
+      const netDue = Math.max(0, base - discount)
+      if (paid > netDue + 1) {
+        throw new MemberCreateBizError(
+          400,
+          "PAID_EXCEEDS_DUE",
+          `Amount paid (₹${paid}) cannot exceed net due after discount (₹${netDue}). Remove overpayment or reduce the discount.`
+        )
+      }
+
+      const subscription = await tx.subscription.create({
+        data: {
+          memberId: newMember.id,
+          planId: plan.id,
+          startDate: data.startDate,
+          endDate: resolvedEndDate,
+          status: "ACTIVE",
+          planNameSnapshot: resolvedPlanName,
+          planPriceSnapshot: base,
+        },
+      })
+
+      await tx.payment.create({
+        data: {
+          memberId: newMember.id,
+          subscriptionId: subscription.id,
+          baseAmount: base,
+          discountAmount: discount,
+          finalAmount: paid,
+          method: data.paymentMode,
+          status: "SUCCESS",
+          purpose: "SUBSCRIPTION",
+        },
+      })
+
+      await tx.auditLog.create({
+        data: {
+          entityType: "MEMBER",
+          entityId: newMember.id,
+          action: "CREATED_WITH_SUBSCRIPTION",
+          after: {
+            name: newMember.name,
+            plan: resolvedPlanName,
+            baseAmount: base,
+            discountAmount: discount,
+            netDue,
+            finalAmountPaid: paid,
+          },
+        },
+      })
+
+      await syncMemberOperationalStatus(newMember.id, tx)
 
       return newMember
     })
 
     return NextResponse.json({ member }, { status: 201 })
-
   } catch (error) {
     console.error("❌ API ERROR [POST /api/members]:", error)
 
-    if (error instanceof Error && error.message.includes("Plan error")) {
-       return NextResponse.json({ error: error.message }, { status: 400 })
+    if (error instanceof MemberCreateBizError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      )
     }
 
-    // Handle specific Prisma duplicate constraint
     if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
       return NextResponse.json(
-        { error: "Member with this phone already exists" },
+        {
+          error: "Member with this phone already exists",
+          code: "DUPLICATE_PHONE",
+        },
         { status: 409 }
       )
     }
 
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: "Something went wrong while creating the member.",
+        code: "INTERNAL",
+      },
+      { status: 500 }
+    )
   }
 }

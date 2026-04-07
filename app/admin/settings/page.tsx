@@ -33,11 +33,16 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState("")
 
+  const [extraPlanNames, setExtraPlanNames] = useState<string[]>([])
+
   useEffect(() => {
     fetch("/api/settings/pricing")
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         if (data.pricing) setPricing(data.pricing)
+        if (Array.isArray(data.extraActivePlanNames)) {
+          setExtraPlanNames(data.extraActivePlanNames)
+        }
       })
       .catch(() => setError("Failed to load pricing"))
       .finally(() => setLoading(false))
@@ -99,6 +104,15 @@ export default function SettingsPage() {
       </div>
 
       <div className="max-w-[560px] bg-[#111111] border border-[#1C1C1C] rounded-xl p-6">
+        {extraPlanNames.length > 0 && (
+          <div className="mb-5 rounded-lg border border-[#F59E0B]/30 bg-[#F59E0B]/10 px-4 py-3">
+            <p className="text-[12px] font-bold text-[#F59E0B]">Extra active plans in database</p>
+            <p className="text-[11px] text-[#888888] mt-1 leading-relaxed">
+              These names are not in the standard list (Monthly … Others). Add Member only uses the five standard plans.
+              Orphan rows: <span className="text-white font-medium">{extraPlanNames.join(", ")}</span>
+            </p>
+          </div>
+        )}
         <div className="border-b border-[#1C1C1C] pb-4 mb-6">
           <h2 className="text-[16px] font-bold text-white">Plan Pricing</h2>
           <p className="text-[12px] text-[#444444] mt-1">

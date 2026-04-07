@@ -102,21 +102,31 @@ export async function deriveMemberPlanState(memberId: string): Promise<MemberPla
   if (liveSub) {
     planUiState = "LIVE"
     displaySub = liveSub
-  } else if (!latestSub) {
-    planUiState = "NEEDS_PLAN"
-    displaySub = null
-  } else if (latestSub.status === "CANCELLED") {
-    planUiState = "CANCELLED"
-    displaySub = latestSub
-  } else if (isMembershipEndPast(latestSub.endDate)) {
-    planUiState = "EXPIRED"
-    displaySub =
-      recentSubs
-        .filter((s) => s.status !== "CANCELLED" && isMembershipEndPast(s.endDate))
-        .sort((a, b) => b.endDate.getTime() - a.endDate.getTime())[0] ?? latestSub
   } else {
-    planUiState = "NEEDS_PLAN"
-    displaySub = latestSub
+    // ACTIVE row with end not yet passed in IST, but "now" is outside [start,end] (e.g. plan
+    // starts tomorrow). Still on a plan — not NEEDS_PLAN / Renew.
+    const activeNotEnded = recentSubs.filter(
+      (s) => s.status === "ACTIVE" && !isMembershipEndPast(s.endDate)
+    )
+    if (activeNotEnded.length > 0) {
+      planUiState = "LIVE"
+      displaySub = activeNotEnded[0]
+    } else if (!latestSub) {
+      planUiState = "NEEDS_PLAN"
+      displaySub = null
+    } else if (latestSub.status === "CANCELLED") {
+      planUiState = "CANCELLED"
+      displaySub = latestSub
+    } else if (isMembershipEndPast(latestSub.endDate)) {
+      planUiState = "EXPIRED"
+      displaySub =
+        recentSubs
+          .filter((s) => s.status !== "CANCELLED" && isMembershipEndPast(s.endDate))
+          .sort((a, b) => b.endDate.getTime() - a.endDate.getTime())[0] ?? latestSub
+    } else {
+      planUiState = "NEEDS_PLAN"
+      displaySub = latestSub
+    }
   }
 
   return {

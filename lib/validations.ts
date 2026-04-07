@@ -36,7 +36,9 @@ export const PaymentModeEnum = z.enum(["CASH", "UPI", "CARD"]);
 export const MemberStatusEnum = z.enum(["ACTIVE", "INACTIVE", "DELETED"]);
 
 /**
- * Member Creation (Updated for new schema)
+ * Member creation body for POST /api/members.
+ * `member.status` is not accepted here — the API derives it from subscriptions after create.
+ * Every signup includes a plan + start date (no “shell only” members).
  */
 export const MemberCreateSchema = z.object({
   name: z.string()
@@ -46,10 +48,8 @@ export const MemberCreateSchema = z.object({
     .regex(NO_HTML_REGEX, "Name contains invalid characters"),
   phone: z.string()
     .regex(PHONE_REGEX, "Invalid Indian mobile number (Must be 10 digits starting with 6-9)"),
-  status: MemberStatusEnum.default("ACTIVE"),
-  // Optional fields for future subscription creation
-  membershipType: MembershipTypeEnum.optional(),
-  startDate: z.coerce.date().optional(),
+  membershipType: MembershipTypeEnum,
+  startDate: z.coerce.date(),
   endDate: z.coerce.date().optional(),
   discountAmount: z.preprocess(
     (val) => {

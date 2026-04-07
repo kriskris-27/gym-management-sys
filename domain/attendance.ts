@@ -1,6 +1,11 @@
 import { prisma } from "../lib/prisma"
 import { getISTDateRange, calcDuration, formatDuration, fromDate, nowUTC } from "../lib/utils"
 import { DateTime } from "luxon"
+import {
+  formatMemberDate,
+  isMembershipEndPast,
+  isMembershipStartInFutureIST,
+} from "../lib/gym-datetime"
 
 // Type for Prisma transaction - inferred from prisma instance
 type PrismaTransaction = Parameters<typeof prisma.$transaction>[0] extends (tx: infer T) => any ? T : never
@@ -92,12 +97,27 @@ export async function scanMember(
     // Even if member status is ACTIVE, they must have a non-expired plan
     const { getActiveSubscription } = await import("./subscription")
     const activeSub = await getActiveSubscription(member.id)
-    
+
     if (!activeSub) {
+      const activeRows = await tx.subscription.findMany({
+        where: { memberId: member.id, status: "ACTIVE" },
+        orderBy: { startDate: "asc" },
+      })
+      const future = activeRows.find(
+        (s) =>
+          isMembershipStartInFutureIST(s.startDate) && !isMembershipEndPast(s.endDate)
+      )
+      if (future) {
+        return {
+          state: "INACTIVE" as const,
+          memberName: member.name,
+          message: `Your membership starts on ${formatMemberDate(future.startDate)}. Check-in opens on that day — see the front desk if you need help.`,
+        }
+      }
       return {
         state: "INACTIVE" as const,
         memberName: member.name,
-        message: "No active plan found. Please renew your membership to enter."
+        message: "No active plan found. Please renew your membership to enter.",
       }
     }
 

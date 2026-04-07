@@ -47,6 +47,18 @@ export async function findLiveSubscription(
   return subscription || null
 }
 
+/** Any ACTIVE subscription whose IST end day has not passed (includes future-dated starts). */
+export async function hasActiveSubscriptionNotEnded(
+  memberId: string,
+  db: DbClient = prisma
+): Promise<boolean> {
+  const rows = await db.subscription.findMany({
+    where: { memberId, status: "ACTIVE" },
+    select: { endDate: true },
+  })
+  return rows.some((s) => !isMembershipEndPast(s.endDate))
+}
+
 /**
  * Sync member operational status from live subscription coverage.
  * DELETED is preserved and never auto-changed.
@@ -69,7 +81,9 @@ export async function syncMemberOperationalStatus(
   }
 
   const liveSub = await findLiveSubscription(memberId, db)
-  const nextStatus: MemberStatus = liveSub ? "ACTIVE" : "INACTIVE"
+  const hasPlanOnFile =
+    liveSub != null || (await hasActiveSubscriptionNotEnded(memberId, db))
+  const nextStatus: MemberStatus = hasPlanOnFile ? "ACTIVE" : "INACTIVE"
 
   if (member.status !== nextStatus) {
     await db.member.update({

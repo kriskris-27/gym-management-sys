@@ -46,15 +46,17 @@ export async function GET(
 
     const { _count, sessions, ...memberData } = member
     const { computeMemberFinancials } = await import("@/lib/financial-service")
-    const [financials, planState] = await Promise.all([
+    const [financials, planState, syncedStatus] = await Promise.all([
       computeMemberFinancials(id),
       deriveMemberPlanState(id),
+      syncMemberOperationalStatus(id),
     ])
     const displaySub = planState.displaySubscription
 
     return NextResponse.json({
       member: {
         ...memberData,
+        status: syncedStatus,
         ...financials,
         membershipType: displaySub?.planNameSnapshot || "NONE",
         subscriptionStatus: displaySub?.status || "INACTIVE",
@@ -261,24 +263,57 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
-    const body = await request.json()
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON body", code: "INVALID_JSON" },
+        { status: 400 }
+      )
+    }
+
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { error: "Expected JSON object body", code: "INVALID_BODY" },
+        { status: 400 }
+      )
+    }
+
+    const action = (body as { action?: unknown }).action
 
     // CASE 1: Restore deleted member
-    if (body.action === "restore") {
+    if (action === "restore") {
       const { RestoreMemberSchema } = await import("@/lib/validations")
       const validated = RestoreMemberSchema.safeParse(body)
-      if (!validated.success) return NextResponse.json({ error: "Invalid request" }, { status: 400 })
+      if (!validated.success) {
+        return NextResponse.json(
+          {
+            error: validated.error.issues[0]?.message ?? "Invalid request",
+            code: "VALIDATION",
+          },
+          { status: 400 }
+        )
+      }
       const restored = await restoreMember(id)
       return NextResponse.json({ member: restored })
     }
 
     // CASE 2: Renewal / Switch
-    if (body.action === "renew" || body.action === "switch") {
+    if (action === "renew" || action === "switch") {
       const { RenewMemberSchema } = await import("@/lib/validations")
       const validated = RenewMemberSchema.safeParse(body)
-      if (!validated.success) return NextResponse.json({ error: validated.error.issues[0].message }, { status: 400 })
+      if (!validated.success) {
+        return NextResponse.json(
+          {
+            error: validated.error.issues[0].message,
+            code: "VALIDATION",
+          },
+          { status: 400 }
+        )
+      }
       const res = await renewOrSwitchMemberPlan(id, {
-        action: body.action,
+        action: action as "renew" | "switch",
         membershipType: validated.data.membershipType,
         endDate: validated.data.endDate,
         customPrice: validated.data.customPrice,
@@ -289,20 +324,30 @@ export async function PATCH(
       return NextResponse.json(res)
     }
 
-
     // CASE 3: Cancel Active Subscription (To allow Plan Switching)
-    if (body.action === "cancel") {
+    if (action === "cancel") {
       const result = await cancelMemberPlan(id)
       return NextResponse.json(result)
     }
 
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 })
-
+    return NextResponse.json(
+      { error: "Invalid action", code: "INVALID_ACTION" },
+      { status: 400 }
+    )
   } catch (error) {
-    console.error("❌ Member PATCH Error:", error)
     if (error instanceof MemberLifecycleError) {
-      return NextResponse.json({ error: error.message }, { status: error.status })
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      )
     }
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Internal Server Error" }, { status: 500 })
+    console.error("❌ Member PATCH Error:", error)
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Internal Server Error",
+        code: "INTERNAL",
+      },
+      { status: 500 }
+    )
   }
 }

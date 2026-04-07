@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useCreateMember } from "@/hooks/useCreateMember"
+import { todayYmdInIST } from "@/lib/gym-datetime"
 
 const schema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters")
@@ -68,7 +69,6 @@ interface FormData {
 export default function AddMemberPage() {
   const router = useRouter()
   const createMemberMutation = useCreateMember()
-  const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const [generalError, setGeneralError] = useState("")
 
@@ -76,12 +76,7 @@ export default function AddMemberPage() {
   const [plans, setPlans] = useState<PricingPlan[]>([])
   const [basePrice, setBasePrice] = useState(0)
 
-  const getTodayStr = () => {
-    const now = new Date()
-    const istOffset = 5.5 * 60 * 60 * 1000
-    const istNow = new Date(now.getTime() + istOffset)
-    return istNow.toISOString().split("T")[0]
-  }
+  const getTodayStr = () => todayYmdInIST()
 
   // Load all plans on mount
   useEffect(() => {
@@ -182,25 +177,24 @@ export default function AddMemberPage() {
   }, [startDate, membershipType, setValue])
 
   const onSubmit = async (data: FormData) => {
-    setLoading(true)
     setGeneralError("")
-    
+
     try {
       const transformedData = {
         ...data,
         startDate: new Date(data.startDate),
         endDate: data.endDate ? new Date(data.endDate) : undefined,
-        status: "ACTIVE" as const
       }
-      
+
       const result = await createMemberMutation.mutateAsync(transformedData)
       setSuccess(true)
       setTimeout(() => {
         router.push(`/admin/members/${result.member.id}`)
       }, 1000)
     } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : ""
       if (error instanceof Error) {
-        if (error.message.includes("phone")) {
+        if (code === "DUPLICATE_PHONE" || error.message.toLowerCase().includes("phone")) {
           setError("phone", { message: "A member with this phone already exists" })
         } else {
           setGeneralError(error.message || "Something went wrong. Try again.")
@@ -208,8 +202,6 @@ export default function AddMemberPage() {
       } else {
         setGeneralError("Something went wrong. Try again.")
       }
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -492,15 +484,15 @@ export default function AddMemberPage() {
 
             <button
               type="submit"
-              disabled={loading || success}
+              disabled={createMemberMutation.isPending || success}
               className={`w-full sm:w-auto flex-1 text-white font-bold text-[12px] tracking-[0.1em] uppercase px-8 py-3.5 rounded-lg transition-all duration-200 flex items-center justify-center
                 ${success ? "bg-[#10B981] hover:bg-[#10B981]" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98]"}
-                ${(loading && !success) ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}
+                ${createMemberMutation.isPending && !success ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}
               `}
             >
               {success ? (
                 <span className="flex items-center gap-2">Added! <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
-              ) : loading ? (
+              ) : createMemberMutation.isPending ? (
                 <div className="flex items-center gap-2">
                   <svg className="animate-spin-custom h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
