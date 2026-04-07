@@ -138,7 +138,9 @@ export default function PaymentsPage() {
       return
     }
     try {
-      const res = await fetch(`/api/members?search=${encodeURIComponent(query)}`)
+      const res = await fetch(
+        `/api/members?search=${encodeURIComponent(query)}&limit=6&page=1`
+      )
       if (res.ok) {
         const data = await res.json()
         setMemberResults((data.members ?? []).slice(0, 6))

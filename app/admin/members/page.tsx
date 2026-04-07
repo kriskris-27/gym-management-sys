@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useMembers } from "@/hooks/useMembers"
 import { useRestoreMember } from "@/hooks/useRestoreMember"
@@ -27,9 +27,20 @@ export default function MembersPage() {
   const router = useRouter()
   const restoreMemberMutation = useRestoreMember()
   const [search, setSearch] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState("All")
   const [planFilter, setPlanFilter] = useState("All Plans")
   const [paymentFilter, setPaymentFilter] = useState("All Payments")
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(id)
+  }, [search])
+
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, statusFilter])
 
   const statusMap: Record<string, string | undefined> = {
     "All": undefined,
@@ -38,8 +49,15 @@ export default function MembersPage() {
     "Deleted": "DELETED"
   }
 
-  const { data: rawData, isLoading: loading } = useMembers(undefined, statusMap[statusFilter])
-  const members: Member[] = rawData?.members ?? []
+  const { data: rawData, isLoading: loading } = useMembers({
+    search: debouncedSearch || undefined,
+    status: statusMap[statusFilter],
+    page,
+    limit: 50,
+  })
+  const members: Member[] = (rawData?.members ?? []) as Member[]
+  const total = rawData?.total ?? 0
+  const totalPages = rawData?.totalPages ?? 1
 
 
   const now = new Date()
@@ -146,7 +164,10 @@ export default function MembersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-white text-[28px] font-black tracking-tight">Members</h1>
-          <p className="text-[#444444] text-[13px]">{members.length} registered</p>
+          <p className="text-[#444444] text-[13px]">
+            {total} registered
+            {totalPages > 1 ? ` · page ${page} of ${totalPages}` : ""}
+          </p>
         </div>
         <button
           onClick={() => router.push("/admin/members/new")}
@@ -219,7 +240,7 @@ export default function MembersPage() {
         })}
       </div>
 
-      {/* PLAN FILTER ROW */}
+      {/* PLAN FILTER ROW — counts are for the current page only */}
       <div className="mt-3 flex gap-2 flex-wrap">
         {["All Plans", "Monthly", "Quarterly", "Half-Yearly", "Annual", "Others"].map(tab => {
           const isActive = planFilter === tab
@@ -328,7 +349,8 @@ export default function MembersPage() {
                   )
 
                   // Plan badge logic
-                  const isPremiumPlan = member.membershipType === "ANNUAL"
+                  const isPremiumPlan =
+                    latestSubscription?.planNameSnapshot === "ANNUAL"
                   const planBadgeClass = isPremiumPlan
                     ? "bg-[#D11F00]/10 text-[#D11F00] border border-[#D11F00]/20"
                     : "bg-[#1C1C1C] text-[#888888] border border-[#242424]"
@@ -421,6 +443,30 @@ export default function MembersPage() {
           </table>
         </div>
       </div>
+
+      {totalPages > 1 && (
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3 text-[13px] text-[#888888]">
+          <button
+            type="button"
+            disabled={page <= 1 || loading}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="px-4 py-2 rounded-lg border border-[#1C1C1C] bg-[#111111] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:border-[#2A2A2A] cursor-pointer"
+          >
+            Previous
+          </button>
+          <span>
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="px-4 py-2 rounded-lg border border-[#1C1C1C] bg-[#111111] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:border-[#2A2A2A] cursor-pointer"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   )
 }

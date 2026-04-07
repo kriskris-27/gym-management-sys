@@ -1,14 +1,10 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  /* config options here */
   experimental: {
-    serverComponentsExternalPackages: ['@prisma/client']
-  }
-};
+    serverComponentsExternalPackages: ["@prisma/client"],
+  },
+  allowedDevOrigins: ["172.20.10.5"],
+}
 
-module.exports = {
-  allowedDevOrigins: ['172.20.10.5'],
-};
-
-export default nextConfig;
+export default nextConfig

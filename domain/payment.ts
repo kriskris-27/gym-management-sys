@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client"
 import { prisma } from "../lib/prisma"
+import { subscriptionWindowCoversNow } from "../lib/gym-datetime"
 import { findLiveSubscription, getActiveSubscription } from "./subscription"
 
 /** Prisma client or transaction — same aggregates for global ledger. */
@@ -577,4 +578,180 @@ export async function getMemberSubscriptionFinancialSummary(memberId: string): P
     subscriptionStatus: activeSubscription?.status || "INACTIVE",
     latestPlanName: latestSubscription?.planNameSnapshot || "N/A"
   }
+}
+
+/** Same numeric shape as list rows need; aligned with `getMemberSubscriptionFinancialSummary` (no extra metadata). */
+export type MemberListFinancialSummary = {
+  totalAmount: number
+  totalPaid: number
+  remaining: number
+  isPaidFull: boolean
+  globalTotalAmount: number
+  globalTotalPaid: number
+  globalRemaining: number
+  currentPlanAmount: number
+  currentPlanPaid: number
+  currentPlanRemaining: number
+}
+
+function emptyMemberListFinancialSummary(): MemberListFinancialSummary {
+  return {
+    totalAmount: 0,
+    totalPaid: 0,
+    remaining: 0,
+    isPaidFull: true,
+    globalTotalAmount: 0,
+    globalTotalPaid: 0,
+    globalRemaining: 0,
+    currentPlanAmount: 0,
+    currentPlanPaid: 0,
+    currentPlanRemaining: 0,
+  }
+}
+
+/**
+ * Batch financial summaries for many members (fixed query count, matches single-member summary rules).
+ */
+export async function batchGetMemberListFinancialSummaries(
+  memberIds: string[]
+): Promise<Map<string, MemberListFinancialSummary>> {
+  const result = new Map<string, MemberListFinancialSummary>()
+  if (memberIds.length === 0) return result
+
+  for (const id of memberIds) {
+    result.set(id, emptyMemberListFinancialSummary())
+  }
+
+  const [subTotals, payTotals, nonCancelledSubs, activeSubs, payBySub] = await Promise.all([
+    prisma.subscription.groupBy({
+      by: ["memberId"],
+      where: { memberId: { in: memberIds }, status: { not: "CANCELLED" } },
+      _sum: { planPriceSnapshot: true },
+    }),
+    prisma.payment.groupBy({
+      by: ["memberId"],
+      where: { memberId: { in: memberIds }, status: "SUCCESS" },
+      _sum: { finalAmount: true, discountAmount: true },
+    }),
+    prisma.subscription.findMany({
+      where: { memberId: { in: memberIds }, status: { not: "CANCELLED" } },
+      select: {
+        id: true,
+        memberId: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+        planPriceSnapshot: true,
+        createdAt: true,
+      },
+    }),
+    prisma.subscription.findMany({
+      where: { memberId: { in: memberIds }, status: "ACTIVE" },
+      select: {
+        id: true,
+        memberId: true,
+        startDate: true,
+        endDate: true,
+        planPriceSnapshot: true,
+        createdAt: true,
+      },
+    }),
+    prisma.payment.groupBy({
+      by: ["memberId", "subscriptionId"],
+      where: {
+        memberId: { in: memberIds },
+        status: "SUCCESS",
+        subscriptionId: { not: null },
+      },
+      _sum: { finalAmount: true, discountAmount: true },
+    }),
+  ])
+
+  for (const row of subTotals) {
+    const r = result.get(row.memberId)
+    if (!r) continue
+    const totalAmount = row._sum.planPriceSnapshot || 0
+    r.totalAmount = totalAmount
+    r.globalTotalAmount = totalAmount
+  }
+
+  const payByMember = new Map<string, { final: number; disc: number }>()
+  for (const row of payTotals) {
+    payByMember.set(row.memberId, {
+      final: row._sum.finalAmount || 0,
+      disc: row._sum.discountAmount || 0,
+    })
+  }
+
+  for (const id of memberIds) {
+    const r = result.get(id)!
+    const pay = payByMember.get(id) ?? { final: 0, disc: 0 }
+    r.totalPaid = pay.final
+    r.globalTotalPaid = pay.final
+    r.remaining = Math.round(r.totalAmount - (pay.final + pay.disc))
+    r.globalRemaining = r.remaining
+    r.isPaidFull = r.remaining <= 1
+  }
+
+  const ncByMember = new Map<string, typeof nonCancelledSubs>()
+  for (const s of nonCancelledSubs) {
+    const arr = ncByMember.get(s.memberId) ?? []
+    arr.push(s)
+    ncByMember.set(s.memberId, arr)
+  }
+  for (const arr of ncByMember.values()) {
+    arr.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+  }
+
+  const activeByMember = new Map<string, typeof activeSubs>()
+  for (const s of activeSubs) {
+    const arr = activeByMember.get(s.memberId) ?? []
+    arr.push(s)
+    activeByMember.set(s.memberId, arr)
+  }
+  for (const arr of activeByMember.values()) {
+    arr.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+  }
+
+  const payLinked = new Map<string, { final: number; disc: number }>()
+  for (const row of payBySub) {
+    if (row.subscriptionId == null) continue
+    payLinked.set(`${row.memberId}|${row.subscriptionId}`, {
+      final: row._sum.finalAmount || 0,
+      disc: row._sum.discountAmount || 0,
+    })
+  }
+
+  for (const id of memberIds) {
+    const r = result.get(id)
+    if (!r) continue
+    try {
+      const activeList = activeByMember.get(id) ?? []
+      const candidates = activeList.slice(0, 24)
+      const live =
+        candidates.find((s) => subscriptionWindowCoversNow(s.startDate, s.endDate)) ?? null
+
+      const ncSorted = ncByMember.get(id) ?? []
+      const latestSubscription = live ?? ncSorted[0] ?? null
+
+      const currentTargetSubId = live?.id ?? latestSubscription?.id ?? null
+      const currentPlanAmount = latestSubscription?.planPriceSnapshot || 0
+
+      const pl = currentTargetSubId
+        ? payLinked.get(`${id}|${currentTargetSubId}`)
+        : undefined
+      const currentPlanPaid = pl?.final ?? 0
+      const currentPlanDisc = pl?.disc ?? 0
+      r.currentPlanAmount = currentPlanAmount
+      r.currentPlanPaid = currentPlanPaid
+      r.currentPlanRemaining = Math.round(currentPlanAmount - (currentPlanPaid + currentPlanDisc))
+    } catch (err) {
+      console.error(`[Payment Domain] batch current-plan slice failed for member ${id}`, err)
+      r.currentPlanAmount = 0
+      r.currentPlanPaid = 0
+      r.currentPlanRemaining = 0
+    }
+  }
+
+  return result
 }

@@ -10,9 +10,13 @@ const PUBLIC_ROUTES = [
   "/checkin",
   "/api/auth/login",
   "/api/attendance/scan",
-  "/api/members/[id]/status",
   "/api/cron/notify",
 ]
+
+/** Public member QR/status probe: `/api/members/<id>/status` (not the literal "[id]" segment). */
+function isPublicMemberStatusPath(pathname: string): boolean {
+  return /^\/api\/members\/[^/]+\/status$/.test(pathname)
+}
 
 /**
  * List of prefixes to always exclude from middleware protection (static assets, etc.)
@@ -24,7 +28,8 @@ export default async function proxy(request: NextRequest) {
 
   // 1. Skip middleware for exclude prefixes and public routes
   const isExcluded = EXCLUDE_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  const isPublic = PUBLIC_ROUTES.includes(pathname)
+  const isPublic =
+    PUBLIC_ROUTES.includes(pathname) || isPublicMemberStatusPath(pathname)
 
   if (isExcluded || isPublic) {
     return NextResponse.next()
@@ -59,11 +64,14 @@ export default async function proxy(request: NextRequest) {
 }
 
 /**
- * Configure strictly guarded matchers for performance and security
+ * Next.js 16+ uses this file as the request proxy (do not add root `middleware.ts` — both files conflict).
+ * `config` must be defined here so it can be parsed at compile time.
  */
 export const config = {
   matcher: [
+    "/admin",
     "/admin/:path*",
+    "/api/members",
     "/api/members/:path*",
     "/api/attendance/today",
     "/api/attendance/:path*",

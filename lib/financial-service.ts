@@ -1,4 +1,50 @@
-import { getMemberSubscriptionFinancialSummary } from "../domain/payment"
+import type { Prisma } from "@prisma/client"
+import {
+  batchGetMemberListFinancialSummaries,
+  getMemberSubscriptionFinancialSummary,
+  type MemberListFinancialSummary,
+} from "../domain/payment"
+
+/** Prisma select for GET /api/members list rows (single source for typing + queries). */
+export const membersListSelect = {
+  id: true,
+  name: true,
+  phone: true,
+  status: true,
+  createdAt: true,
+  lastCheckinAt: true,
+  updatedAt: true,
+  subscriptions: {
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+    select: {
+      startDate: true,
+      endDate: true,
+      status: true,
+      planNameSnapshot: true,
+      planPriceSnapshot: true,
+    },
+  },
+} satisfies Prisma.MemberSelect
+
+export type MemberListQueryRow = Prisma.MemberGetPayload<{
+  select: typeof membersListSelect
+}>
+
+export function emptyMemberFinancials(): MemberFinancials {
+  return {
+    totalAmount: 0,
+    totalPaid: 0,
+    remaining: 0,
+    isPaidFull: true,
+    globalTotalAmount: 0,
+    globalTotalPaid: 0,
+    globalRemaining: 0,
+    currentPlanAmount: 0,
+    currentPlanPaid: 0,
+    currentPlanRemaining: 0,
+  }
+}
 
 export interface MemberFinancials {
   totalAmount: number
@@ -13,20 +59,7 @@ export interface MemberFinancials {
   currentPlanRemaining: number
 }
 
-export interface MemberWithFinancials {
-  id: string
-  name: string
-  phone: string
-  status: string
-  lastCheckinAt: Date | null
-  createdAt: Date
-  updatedAt: Date
-  // Financial fields
-  totalAmount: number
-  totalPaid: number
-  remaining: number
-  isPaidFull: boolean
-}
+export type MemberWithFinancials = MemberListQueryRow & MemberFinancials
 
 /**
  * Single source of truth for all financial computations
@@ -57,26 +90,68 @@ export async function computeMemberFinancials(memberId: string): Promise<MemberF
   }
 }
 
+function ledgerSummaryToFinancials(row: MemberListFinancialSummary): MemberFinancials {
+  return { ...row }
+}
+
+function summaryToFinancials(
+  s: Awaited<ReturnType<typeof getMemberSubscriptionFinancialSummary>>
+): MemberFinancials {
+  return {
+    totalAmount: s.totalAmount,
+    totalPaid: s.totalPaid,
+    remaining: s.remaining,
+    isPaidFull: s.isPaidFull,
+    globalTotalAmount: s.globalTotalAmount,
+    globalTotalPaid: s.globalTotalPaid,
+    globalRemaining: s.globalRemaining,
+    currentPlanAmount: s.currentPlanAmount,
+    currentPlanPaid: s.currentPlanPaid,
+    currentPlanRemaining: s.currentPlanRemaining,
+  }
+}
+
 /**
- * Helper to attach financials to member objects
+ * Attach financials to list rows. Batch load with per-member isolation: batch failure
+ * falls back to per-member summaries; each member errors map to empty financials.
  */
-export async function attachFinancialsToMembers(members: {
-  id: string
-  name: string
-  phone: string
-  status: string
-  lastCheckinAt: Date | null
-  createdAt: Date
-  updatedAt: Date
-}[]): Promise<MemberWithFinancials[]> {
+export async function attachFinancialsToMembers(
+  members: MemberListQueryRow[]
+): Promise<MemberWithFinancials[]> {
   if (members.length === 0) return []
 
-  const withFinance = await Promise.all(
-    members.map(async (member) => {
-      const financials = await computeMemberFinancials(member.id)
-      return { ...member, ...financials }
-    })
-  )
+  const ids = members.map((m) => m.id)
+  let batch: Map<string, MemberFinancials>
 
-  return withFinance
+  try {
+    const raw = await batchGetMemberListFinancialSummaries(ids)
+    batch = new Map(
+      Array.from(raw.entries()).map(([id, row]) => [id, ledgerSummaryToFinancials(row)])
+    )
+  } catch (batchErr) {
+    console.error(
+      "[Financial Service] batchGetMemberListFinancialSummaries failed; using per-member fallback",
+      batchErr
+    )
+    batch = new Map()
+    const entries = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const s = await getMemberSubscriptionFinancialSummary(id)
+          return [id, summaryToFinancials(s)] as const
+        } catch (err) {
+          console.error(`[Financial Service] member ${id} financial summary failed`, err)
+          return [id, emptyMemberFinancials()] as const
+        }
+      })
+    )
+    for (const [id, fin] of entries) {
+      batch.set(id, fin)
+    }
+  }
+
+  return members.map((member) => {
+    const financials = batch.get(member.id) ?? emptyMemberFinancials()
+    return { ...member, ...financials }
+  })
 }

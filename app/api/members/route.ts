@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import type { MemberStatus, Prisma } from "@prisma/client"
 import prisma from "@/lib/prisma"
+import { getAuthUser } from "@/lib/auth"
+import { attachFinancialsToMembers, membersListSelect } from "@/lib/financial-service"
 import { MemberCreateSchema } from "@/lib/validations"
 import { syncMemberOperationalStatus } from "@/domain/subscription"
 import { membershipEndDateFromStartAndDurationDaysIST } from "@/lib/gym-datetime"
@@ -22,17 +24,57 @@ class MemberCreateBizError extends Error {
  */
 const ALLOWED_MEMBER_LIST_STATUSES = ["ACTIVE", "INACTIVE", "DELETED"] as const
 
+const MEMBERS_LIST_DEFAULT_PAGE = 1
+const MEMBERS_LIST_DEFAULT_LIMIT = 50
+const MEMBERS_LIST_MIN_LIMIT = 1
+const MEMBERS_LIST_MAX_LIMIT = 100
+
+/**
+ * GET /api/members — contract (always present):
+ * `{ members, page, limit, total, totalPages }`
+ */
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const search = searchParams.get("search")
-    ?.trim()
-    .slice(0, 100)
-  const rawStatus = searchParams.get("status")
-  const status = (rawStatus ?? "").trim()
-  const limitParam = searchParams.get("limit")
-  const pageParam = searchParams.get("page")
+  let user: Awaited<ReturnType<typeof getAuthUser>>
+  try {
+    user = await getAuthUser()
+  } catch (error) {
+    console.error("❌ API ERROR [GET /api/members] auth/session verification:", error)
+    return NextResponse.json(
+      {
+        error:
+          "Session could not be verified. Check authentication configuration or try again.",
+        code: "AUTH_VERIFICATION_FAILED",
+      },
+      { status: 503 }
+    )
+  }
+
+  if (!user) {
+    return NextResponse.json(
+      { error: "Unauthorized", code: "UNAUTHORIZED" },
+      { status: 401 }
+    )
+  }
 
   try {
+    let searchParams: URLSearchParams
+    try {
+      searchParams = new URL(request.url).searchParams
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid request URL", code: "INVALID_URL" },
+        { status: 400 }
+      )
+    }
+
+    const search = searchParams.get("search")
+      ?.trim()
+      .slice(0, 100)
+    const rawStatus = searchParams.get("status")
+    const status = (rawStatus ?? "").trim()
+    const limitParam = searchParams.get("limit")
+    const pageParam = searchParams.get("page")
+
     if (
       rawStatus !== null &&
       status !== "" &&
@@ -47,6 +89,37 @@ export async function GET(request: Request) {
         },
         { status: 400 }
       )
+    }
+
+    let limit = MEMBERS_LIST_DEFAULT_LIMIT
+    if (limitParam !== null && limitParam !== "") {
+      const parsed = parseInt(limitParam, 10)
+      if (
+        !Number.isFinite(parsed) ||
+        parsed < MEMBERS_LIST_MIN_LIMIT ||
+        parsed > MEMBERS_LIST_MAX_LIMIT
+      ) {
+        return NextResponse.json(
+          {
+            error: `limit must be an integer between ${MEMBERS_LIST_MIN_LIMIT} and ${MEMBERS_LIST_MAX_LIMIT}.`,
+            code: "INVALID_LIMIT",
+          },
+          { status: 400 }
+        )
+      }
+      limit = Math.floor(parsed)
+    }
+
+    let requestedPage = MEMBERS_LIST_DEFAULT_PAGE
+    if (pageParam !== null && pageParam !== "") {
+      const parsed = parseInt(pageParam, 10)
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        return NextResponse.json(
+          { error: "page must be a positive integer.", code: "INVALID_PAGE" },
+          { status: 400 }
+        )
+      }
+      requestedPage = Math.floor(parsed)
     }
 
     const where: Prisma.MemberWhereInput = {}
@@ -69,71 +142,35 @@ export async function GET(request: Request) {
       ]
     }
 
-    let skip: number | undefined
-    let take: number | undefined
-    if (limitParam !== null && limitParam !== "") {
-      const limitParsed = parseInt(limitParam, 10)
-      const limit =
-        Number.isFinite(limitParsed) && limitParsed > 0
-          ? Math.min(100, Math.floor(limitParsed))
-          : 50
-      const pageParsed = parseInt(pageParam ?? "1", 10)
-      const page =
-        Number.isFinite(pageParsed) && pageParsed > 0
-          ? Math.floor(pageParsed)
-          : 1
-      skip = (page - 1) * limit
-      take = limit
-    }
+    const total = await prisma.member.count({ where })
+    const totalPages = Math.max(1, Math.ceil(total / limit))
+    const page = Math.min(requestedPage, totalPages)
+    const skip = (page - 1) * limit
 
-    const [members, total] = await Promise.all([
-      prisma.member.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-          status: true,
-          createdAt: true,
-          lastCheckinAt: true,
-          updatedAt: true,
-          subscriptions: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-            select: {
-              startDate: true,
-              endDate: true,
-              status: true,
-              planNameSnapshot: true,
-              planPriceSnapshot: true,
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        ...(skip !== undefined ? { skip, take } : {}),
-      }),
-      prisma.member.count({ where }),
-    ])
-
-    const { attachFinancialsToMembers } = await import("@/lib/financial-service")
-    const membersWithFinance = await attachFinancialsToMembers(members as any)
-
-    const payload: {
-      members: typeof membersWithFinance
-      total: number
-      page?: number
-      limit?: number
-    } = { members: membersWithFinance, total }
-    if (take !== undefined && skip !== undefined) {
-      payload.page = Math.floor(skip / take) + 1
-      payload.limit = take
-    }
-
-    return NextResponse.json(payload, {
-      headers: {
-        "Cache-Control": "private, no-store",
-      },
+    const members = await prisma.member.findMany({
+      where,
+      select: membersListSelect,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
     })
+
+    const membersWithFinance = await attachFinancialsToMembers(members)
+
+    return NextResponse.json(
+      {
+        members: membersWithFinance,
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+      {
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      }
+    )
   } catch (error) {
     console.error("❌ API ERROR [GET /api/members]:", error)
     return NextResponse.json(
