@@ -102,7 +102,8 @@ export const MemberCreateSchema = z.object({
 });
 
 /**
- * Member Update (Partial updates, id required)
+ * Member Update (Partial updates, id required).
+ * `status` may only be set to DELETED (soft-delete via PUT). ACTIVE/INACTIVE are derived from subscriptions.
  */
 export const MemberUpdateSchema = z.object({
   id: z.string().min(1, "Member ID is required"),
@@ -118,7 +119,7 @@ export const MemberUpdateSchema = z.object({
   membershipType: MembershipTypeEnum.optional(),
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
-  status: MemberStatusEnum.optional(),
+  status: z.literal("DELETED").optional(),
   discountAmount: z.preprocess(
     (val) => (val === "" || val === null || val === undefined) ? 0 : Number(val),
     z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high").optional()
@@ -198,6 +199,7 @@ export const RenewMemberSchema = z.object({
     "MONTHLY", "QUARTERLY", "HALF_YEARLY",
     "ANNUAL", "OTHERS"
   ]).optional(),
+  /** ISO date string — optional explicit subscription start (renew/switch). */
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   customPrice: z.coerce.number()
@@ -210,7 +212,15 @@ export const RenewMemberSchema = z.object({
     z.number().min(0).max(99999).default(0)
   ),
   paymentMode: PaymentModeEnum.optional().default("CASH"),
-}).strict();
+})
+  .strict()
+  .refine(
+    (data) => {
+      if (!data.startDate) return true
+      return !Number.isNaN(Date.parse(data.startDate))
+    },
+    { message: "Invalid start date", path: ["startDate"] }
+  );
 
 /**
  * Member Restore

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 
 export async function GET() {
+  const auth = await requireAuthUser("GET /api/debug/migration-status")
+  if (!auth.ok) return auth.response
+
   try {
     // Simple test without Prisma client (since generation failed)
     return NextResponse.json({

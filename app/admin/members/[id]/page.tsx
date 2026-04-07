@@ -113,12 +113,23 @@ export default function MemberProfilePage() {
   const id = params?.id as string
 
   // React Query hooks - replace manual fetch + useState
-  const { data: memberData, isLoading: memberLoading, isError: memberError } = useMember(id)
-  const { data: paymentsData, isLoading: paymentsLoading } = usePayments({ memberId: id })
-  const { data: summaryData, isLoading: summaryLoading, error: summaryError } = usePaymentSummary(id)
+  const { data: memberData, isLoading: memberLoading, isError: memberError } = useMember(id, {
+    live: true,
+  })
+  const { data: paymentsData, isLoading: paymentsLoading } = usePayments(
+    { memberId: id },
+    { live: true }
+  )
+  const { data: summaryData, isLoading: summaryLoading, error: summaryError } =
+    usePaymentSummary(id, { live: true })
   const [attendancePage, setAttendancePage] = useState(1)
   const ATTENDANCE_LIMIT = 10
-  const { data: attendanceData, isLoading: attendanceLoading } = useMemberAttendance(id, attendancePage, ATTENDANCE_LIMIT)
+  const { data: attendanceData, isLoading: attendanceLoading } = useMemberAttendance(
+    id,
+    attendancePage,
+    ATTENDANCE_LIMIT,
+    { live: true }
+  )
 
   // Debug payment summary hook
   useEffect(() => {
@@ -447,7 +458,9 @@ export default function MemberProfilePage() {
       resetRenewal({
         membershipType:
           member.membershipType && member.membershipType !== "NONE" ? member.membershipType : "MONTHLY",
-        startDate: renewalAction === "switch" ? toYmd(member.startDate) : toYmd(member.endDate),
+        startDate: isAddPlanMode
+          ? getTodayStr()
+          : (renewalAction === "switch" ? toYmd(member.startDate) : toYmd(member.endDate)),
         customPrice: undefined,
       })
     }
@@ -457,8 +470,23 @@ export default function MemberProfilePage() {
     try {
       setRenewError("")
       setRenewLoading(true)
+
+      // Deleted member flow: restore first, then add a new plan starting today (or chosen date).
+      if (isDeletedMember) {
+        const restoreRes = await fetch(`/api/members/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "restore" }),
+        })
+        if (!restoreRes.ok) {
+          const errorData = await restoreRes.json().catch(() => null)
+          setRenewError(errorData?.error || "Failed to restore member")
+          return
+        }
+      }
+
       const payload: RenewalPayload = {
-        action: renewalAction,
+        action: isAddPlanMode ? "renew" : renewalAction,
         membershipType: data.membershipType,
         startDate: data.startDate,
         customPrice: data.customPrice ? Number(data.customPrice) : undefined,
@@ -487,8 +515,13 @@ export default function MemberProfilePage() {
           resetRenewal()
         }, 500)
       } else {
-        const errorData = await res.json()
-        setRenewError(errorData.error || "Failed to renew membership")
+        const errorData = await res.json().catch(() => null)
+        setRenewError(
+          errorData?.error ||
+            (res.status === 403
+              ? "Cannot add this plan: member still has pending dues. Clear the previous balance first."
+              : "Failed to renew membership")
+        )
       }
     } catch (e) {
       console.error(e)
@@ -549,6 +582,9 @@ export default function MemberProfilePage() {
   const daysSinceEnd = endInfo.daysSinceEnd
   const isExpiringSoon =
     isLivePlan && !endInfo.isPastEnd && daysUntilEnd >= 0 && daysUntilEnd <= 7
+  const isDeletedMember = member.status === "DELETED"
+  const isAddPlanMode = isDeletedMember || needsPlan
+  const shouldShowRenew = !isDeletedMember && isExpiredPlan && endInfo.isPastEnd
 
   const initial = member.name?.charAt(0).toUpperCase() || "?"
 
@@ -604,14 +640,18 @@ export default function MemberProfilePage() {
         <div className="bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-xl px-5 py-4 mb-4 flex justify-between items-center animate-fade">
           <div>
             <p className="text-[#F59E0B] font-bold text-[14px]">
-              {isCancelledPlan
+              {isDeletedMember
+                ? "⚠ Member Deleted"
+                : isCancelledPlan
                 ? "⚠ Plan Cancelled"
                 : isExpiredPlan && endInfo.isPastEnd
                   ? "⚠ Membership Expired"
                   : "⚠ No Active Membership"}
             </p>
             <p className="text-[#888888] text-[12px] mt-0.5">
-              {isCancelledPlan
+              {isDeletedMember
+                ? "Add a new plan to restore this member back to ACTIVE."
+                : isCancelledPlan
                 ? "Use Switch Plan to upgrade or change — previous payments count toward the global balance."
                 : isExpiredPlan && endInfo.isPastEnd
                   ? `Expired on ${formatMemberDate(member.endDate)}`
@@ -630,7 +670,7 @@ export default function MemberProfilePage() {
                 Switch Plan
               </button>
             )}
-            {((isExpiredPlan && endInfo.isPastEnd) || needsPlan) && (
+            {shouldShowRenew && (
               <button
                 onClick={() => {
                   setRenewalAction("renew")
@@ -639,6 +679,17 @@ export default function MemberProfilePage() {
                 className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
               >
                 Renew Plan
+              </button>
+            )}
+            {!shouldShowRenew && !isCancelledPlan && (
+              <button
+                onClick={() => {
+                  setRenewalAction("renew")
+                  setShowRenewalModal(true)
+                }}
+                className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
+              >
+                Add Plan
               </button>
             )}
           </div>
@@ -1106,10 +1157,17 @@ export default function MemberProfilePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setShowRenewalModal(false)} />
           <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[440px] w-full relative z-10 animate-modal shadow-2xl shadow-black/50 overflow-y-auto max-h-[90vh]">
-            <h2 className="text-white text-[20px] font-black tracking-tight">{renewalAction === "switch" ? "Switch Plan" : "Renew Membership"}</h2>
+            <h2 className="text-white text-[20px] font-black tracking-tight">
+              {isAddPlanMode ? "Add Plan" : renewalAction === "switch" ? "Switch Plan" : "Renew Membership"}
+            </h2>
             <p className="text-[#666666] text-[13px] mt-1 mb-6">{member.name}</p>
             
             <form onSubmit={handleRenewalSubmit(onRenewalSubmit)} className="space-y-5">
+              {renewError && (
+                <div className="bg-[#D11F00]/10 border border-[#D11F00]/20 rounded-lg px-4 py-3">
+                  <p className="text-[#D11F00] text-[12px] font-medium">{renewError}</p>
+                </div>
+              )}
               <div>
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Plan</label>
                 <select
@@ -1139,7 +1197,9 @@ export default function MemberProfilePage() {
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">
                   Start Date{" "}
                   <span className="text-[#10B981] ml-1 font-normal normal-case">
-                    {renewalAction === "switch"
+                    {isAddPlanMode
+                      ? "(starts today)"
+                      : renewalAction === "switch"
                       ? "(Server uses original start of cancelled plan)"
                       : "(≤28 days after last expiry → aligns to that date; else today)"}
                   </span>
@@ -1147,8 +1207,12 @@ export default function MemberProfilePage() {
                 <input
                   {...regRenewal("startDate")}
                   type="date"
-                  disabled
-                  className="w-full bg-[#0F0F0F] border border-[#242424] text-[#555555] text-[14px] rounded-lg px-3 py-3 opacity-50 cursor-not-allowed [color-scheme:dark]"
+                  disabled={!isAddPlanMode}
+                  className={`w-full bg-[#0F0F0F] border border-[#242424] text-[14px] rounded-lg px-3 py-3 [color-scheme:dark] ${
+                    !isAddPlanMode
+                      ? "text-[#555555] opacity-50 cursor-not-allowed"
+                      : "text-white focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981]/20 focus:outline-none cursor-pointer"
+                  }`}
                 />
               </div>
 

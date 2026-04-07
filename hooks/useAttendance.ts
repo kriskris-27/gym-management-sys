@@ -13,15 +13,25 @@ export function useAttendanceToday() {
   })
 }
 
-export function useMemberAttendance(memberId: string, page: number = 1, limit: number = 10) {
+export function useMemberAttendance(
+  memberId: string,
+  page: number = 1,
+  limit: number = 10,
+  options?: { live?: boolean }
+) {
+  const live = options?.live ?? false
   return useQuery({
     queryKey: ["attendance", "member", memberId, page],
     queryFn: async () => {
-      const res = await fetch(`/api/attendance/${memberId}?page=${page}&limit=${limit}`)
+      const res = await fetch(`/api/attendance/${memberId}?page=${page}&limit=${limit}`, {
+        cache: "no-store",
+      })
       if (!res.ok) throw new Error("Failed to fetch member attendance")
       return res.json()
     },
-    staleTime: 30 * 1000,
+    staleTime: live ? 0 : 30 * 1000,
+    refetchInterval: live ? 2000 : false,
+    refetchOnWindowFocus: true,
     enabled: !!memberId,
   })
 }

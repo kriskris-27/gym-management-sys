@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { formatDuration } from "@/lib/utils"
 
@@ -10,6 +11,9 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ memberId: string }> }
 ) {
+  const auth = await requireAuthUser("GET /api/attendance/[memberId]")
+  if (!auth.ok) return auth.response
+
   try {
     const { memberId } = await params
     const { searchParams } = new URL(request.url)

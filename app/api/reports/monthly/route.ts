@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 
 // Type definitions for report data
@@ -25,6 +26,9 @@ interface AttendanceRecord {
  * All calculations are pinned to IST (UTC+5:30).
  */
 export async function GET(request: Request) {
+  const auth = await requireAuthUser("GET /api/reports/monthly")
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(request.url)
 
   // 1. BASELINE IST CALCULATIONS

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 import { getValidSessions, getSessionStats } from "@/lib/attendance-cleanup"
 import { getISTDateRange } from "@/lib/utils"
 
@@ -7,6 +8,9 @@ import { getISTDateRange } from "@/lib/utils"
  * Excludes auto-closed sessions and open sessions from calculations
  */
 export async function GET(request: Request) {
+  const auth = await requireAuthUser("GET /api/attendance/reports")
+  if (!auth.ok) return auth.response
+
   try {
     const { searchParams } = new URL(request.url)
     const memberId = searchParams.get('memberId')

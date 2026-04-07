@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 import { prisma } from "@/lib/prisma"
 import { computeMemberFinancials } from "@/lib/financial-service"
 
@@ -6,6 +7,9 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ memberId: string }> }
 ) {
+  const auth = await requireAuthUser("GET /api/payments/summary/[memberId]")
+  if (!auth.ok) return auth.response
+
   try {
     const { memberId } = await params
     console.log(`[Payment Summary API] Request for member: ${memberId}`)

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { getUTCDateRange, toDisplayTimezone, nowUTC } from "@/lib/utils"
 
@@ -8,6 +9,9 @@ import { getUTCDateRange, toDisplayTimezone, nowUTC } from "@/lib/utils"
  * Authentication: Handled by proxy middleware
  */
 export async function GET() {
+  const auth = await requireAuthUser("GET /api/dashboard/summary")
+  if (!auth.ok) return auth.response
+
   // 1. TIME AUTHORITY - Single UTC source of truth
   const { todayUTC, tomorrowUTC } = getUTCDateRange()
   

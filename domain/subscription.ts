@@ -127,6 +127,27 @@ export async function reconcileExpiredSubscriptions(
   }
 }
 
+/**
+ * Mark this member's ACTIVE subscriptions as EXPIRED when IST end day has passed.
+ * Call before renew/switch validation so DB matches reality even if cron has not run.
+ */
+export async function expireStaleActiveSubscriptionsForMember(
+  memberId: string,
+  db: DbClient = prisma
+): Promise<number> {
+  const actives = await db.subscription.findMany({
+    where: { memberId, status: "ACTIVE" },
+    select: { id: true, endDate: true },
+  })
+  const ids = actives.filter((s) => isMembershipEndPast(s.endDate)).map((s) => s.id)
+  if (ids.length === 0) return 0
+  await db.subscription.updateMany({
+    where: { id: { in: ids } },
+    data: { status: "EXPIRED" },
+  })
+  return ids.length
+}
+
 export async function getActiveSubscription(memberId: string): Promise<Subscription | null> {
   console.log(`[Subscription Domain] Getting active subscription for member: ${memberId}`)
 

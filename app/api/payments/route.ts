@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { PaymentCreateSchema } from "@/lib/validations"
 import {
@@ -13,6 +14,9 @@ import {
  * Logic: Supports searching by Member ID, Date ranges, and Payment Mode.
  */
 export async function GET(request: Request) {
+  const auth = await requireAuthUser("GET /api/payments")
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(request.url)
   const memberId = searchParams.get("memberId")
   const startDate = searchParams.get("startDate")
@@ -106,6 +110,9 @@ export async function GET(request: Request) {
  * Logic: Validated with Zod schema and enforces member existence (non-deleted).
  */
 export async function POST(request: Request) {
+  const auth = await requireAuthUser("POST /api/payments")
+  if (!auth.ok) return auth.response
+
   try {
     const body = await request.json()
     const validated = PaymentCreateSchema.safeParse(body)

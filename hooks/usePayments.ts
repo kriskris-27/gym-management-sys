@@ -7,7 +7,8 @@ interface PaymentFilters {
   endDate?: string
 }
 
-export function usePayments(filters?: PaymentFilters) {
+export function usePayments(filters?: PaymentFilters, options?: { live?: boolean }) {
+  const live = options?.live ?? false
   return useQuery({
     queryKey: ["payments", filters ?? {}],
     queryFn: async () => {
@@ -17,23 +18,32 @@ export function usePayments(filters?: PaymentFilters) {
       if (filters?.startDate) params.set("startDate", filters.startDate)
       if (filters?.endDate) params.set("endDate", filters.endDate)
       const query = params.toString()
-      const res = await fetch(`/api/payments${query ? `?${query}` : ""}`)
+      const res = await fetch(`/api/payments${query ? `?${query}` : ""}`, {
+        cache: "no-store",
+      })
       if (!res.ok) throw new Error("Failed to fetch payments")
       return res.json()
     },
-    staleTime: 30 * 1000,
+    staleTime: live ? 0 : 30 * 1000,
+    refetchInterval: live ? 2000 : false,
+    refetchOnWindowFocus: true,
   })
 }
 
-export function usePaymentSummary(memberId: string) {
+export function usePaymentSummary(memberId: string, options?: { live?: boolean }) {
+  const live = options?.live ?? false
   return useQuery({
     queryKey: ["payments", "summary", memberId],
     queryFn: async () => {
-      const res = await fetch(`/api/payments/summary/${memberId}`)
+      const res = await fetch(`/api/payments/summary/${memberId}`, {
+        cache: "no-store",
+      })
       if (!res.ok) throw new Error("Failed to fetch payment summary")
       return res.json()
     },
-    staleTime: 30 * 1000,
+    staleTime: live ? 0 : 30 * 1000,
+    refetchInterval: live ? 1000 : false,
+    refetchOnWindowFocus: true,
     enabled: !!memberId,
   })
 }

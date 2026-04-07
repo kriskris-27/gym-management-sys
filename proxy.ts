@@ -13,11 +13,6 @@ const PUBLIC_ROUTES = [
   "/api/cron/notify",
 ]
 
-/** Public member QR/status probe: `/api/members/<id>/status` (not the literal "[id]" segment). */
-function isPublicMemberStatusPath(pathname: string): boolean {
-  return /^\/api\/members\/[^/]+\/status$/.test(pathname)
-}
-
 /**
  * List of prefixes to always exclude from middleware protection (static assets, etc.)
  */
@@ -28,8 +23,7 @@ export default async function proxy(request: NextRequest) {
 
   // 1. Skip middleware for exclude prefixes and public routes
   const isExcluded = EXCLUDE_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  const isPublic =
-    PUBLIC_ROUTES.includes(pathname) || isPublicMemberStatusPath(pathname)
+  const isPublic = PUBLIC_ROUTES.includes(pathname)
 
   if (isExcluded || isPublic) {
     return NextResponse.next()

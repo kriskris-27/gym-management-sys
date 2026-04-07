@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { PricingUpdateSchema } from "@/lib/validations"
 
@@ -11,6 +12,9 @@ const ORDER: ("MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS")[] =
 ]
 
 export async function GET() {
+  const auth = await requireAuthUser("GET /api/settings/pricing")
+  if (!auth.ok) return auth.response
+
   try {
     const plans = await prisma.plan.findMany({
       where: { isActive: true },
@@ -54,6 +58,9 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const auth = await requireAuthUser("PUT /api/settings/pricing")
+  if (!auth.ok) return auth.response
+
   try {
     const body = await request.json()
     const validated = PricingUpdateSchema.safeParse(body)

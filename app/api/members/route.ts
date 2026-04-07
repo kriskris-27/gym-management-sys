@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import type { MemberStatus, Prisma } from "@prisma/client"
 import prisma from "@/lib/prisma"
-import { getAuthUser } from "@/lib/auth"
+import { requireAuthUser } from "@/lib/api-auth"
 import { attachFinancialsToMembers, membersListSelect } from "@/lib/financial-service"
 import { MemberCreateSchema } from "@/lib/validations"
 import { syncMemberOperationalStatus } from "@/domain/subscription"
@@ -34,27 +34,8 @@ const MEMBERS_LIST_MAX_LIMIT = 100
  * `{ members, page, limit, total, totalPages }`
  */
 export async function GET(request: Request) {
-  let user: Awaited<ReturnType<typeof getAuthUser>>
-  try {
-    user = await getAuthUser()
-  } catch (error) {
-    console.error("❌ API ERROR [GET /api/members] auth/session verification:", error)
-    return NextResponse.json(
-      {
-        error:
-          "Session could not be verified. Check authentication configuration or try again.",
-        code: "AUTH_VERIFICATION_FAILED",
-      },
-      { status: 503 }
-    )
-  }
-
-  if (!user) {
-    return NextResponse.json(
-      { error: "Unauthorized", code: "UNAUTHORIZED" },
-      { status: 401 }
-    )
-  }
+  const auth = await requireAuthUser("GET /api/members")
+  if (!auth.ok) return auth.response
 
   try {
     let searchParams: URLSearchParams
@@ -187,6 +168,9 @@ export async function GET(request: Request) {
  * POST: Create a new member (simplified for new schema)
  */
 export async function POST(request: Request) {
+  const auth = await requireAuthUser("POST /api/members")
+  if (!auth.ok) return auth.response
+
   try {
     let body: unknown
     try {
@@ -201,10 +185,16 @@ export async function POST(request: Request) {
     const validated = MemberCreateSchema.safeParse(body)
 
     if (!validated.success) {
+      const issues = validated.error.issues.map((issue) => ({
+        path: issue.path.map((p) => String(p)),
+        message: issue.message,
+        code: issue.code,
+      }))
       return NextResponse.json(
         {
-          error: validated.error.issues[0].message,
+          error: issues[0]?.message ?? "Validation failed",
           code: "VALIDATION",
+          issues,
         },
         { status: 400 }
       )

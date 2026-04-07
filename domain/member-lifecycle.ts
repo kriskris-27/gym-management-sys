@@ -1,7 +1,12 @@
 import prisma from "@/lib/prisma"
 import type { PaymentMethod, Prisma } from "@prisma/client"
 import { computeGlobalMemberLedger } from "./payment"
-import { findLiveSubscription, syncMemberOperationalStatus } from "./subscription"
+import {
+  expireStaleActiveSubscriptionsForMember,
+  findLiveSubscription,
+  syncMemberOperationalStatus,
+} from "./subscription"
+import type { DateTime } from "luxon"
 import { fromDate, nowUTC } from "@/lib/utils"
 
 type Tx = Prisma.TransactionClient
@@ -22,6 +27,8 @@ export class MemberLifecycleError extends Error {
 type RenewSwitchPayload = {
   action: MemberAction
   membershipType?: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
+  /** Optional explicit subscription start (ISO date string). Overrides computed anchor when valid. */
+  startDate?: string
   endDate?: string
   customPrice?: number
   manualPlanName?: string
@@ -42,6 +49,43 @@ export async function restoreMember(memberId: string) {
   })
   const syncedStatus = await syncMemberOperationalStatus(memberId)
   return { ...restored, status: syncedStatus }
+}
+
+/**
+ * Soft-delete: expire all ACTIVE subscriptions for the member, then mark member DELETED.
+ */
+export async function softDeleteMember(memberId: string) {
+  const member = await prisma.member.findUnique({ where: { id: memberId } })
+  if (!member) {
+    throw new MemberLifecycleError(404, "Member not found", "NOT_FOUND")
+  }
+  if (member.status === "DELETED") {
+    throw new MemberLifecycleError(404, "Member not found", "NOT_FOUND")
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.subscription.updateMany({
+      where: { memberId, status: "ACTIVE" },
+      data: { status: "EXPIRED" },
+    })
+
+    await tx.member.update({
+      where: { id: memberId },
+      data: { status: "DELETED" },
+    })
+
+    await tx.auditLog.create({
+      data: {
+        entityType: "MEMBER",
+        entityId: memberId,
+        action: "SOFT_DELETED",
+        before: { status: member.status },
+      },
+    })
+  })
+
+  await syncMemberOperationalStatus(memberId)
+  return { success: true as const }
 }
 
 export async function cancelMemberPlan(memberId: string) {
@@ -122,6 +166,8 @@ async function applyRenewOutstandingGuard(tx: Tx, memberId: string) {
 }
 
 export async function renewOrSwitchMemberPlan(memberId: string, payload: RenewSwitchPayload) {
+  await expireStaleActiveSubscriptionsForMember(memberId)
+
   await validateActionPreconditions(memberId, payload.action)
 
   const member = await prisma.member.findUnique({
@@ -133,8 +179,10 @@ export async function renewOrSwitchMemberPlan(memberId: string, payload: RenewSw
   if (!member) throw new MemberLifecycleError(404, "Member not found", "NOT_FOUND")
 
   const subscription = await prisma.$transaction(async (tx) => {
+    await expireStaleActiveSubscriptionsForMember(memberId, tx)
+
     const nowIST = nowUTC()
-    let resolvedStartDate = nowIST
+    let resolvedStartDate: DateTime = nowIST
 
     if (payload.action === "renew") {
       await applyRenewOutstandingGuard(tx, memberId)
@@ -170,6 +218,14 @@ export async function renewOrSwitchMemberPlan(memberId: string, payload: RenewSw
         orderBy: { createdAt: "desc" },
       })
       if (cancelledSub) resolvedStartDate = fromDate(cancelledSub.startDate)
+    }
+
+    if (payload.startDate) {
+      const parsed = fromDate(new Date(payload.startDate))
+      if (!parsed.isValid) {
+        throw new MemberLifecycleError(400, "Invalid start date", "INVALID_START_DATE")
+      }
+      resolvedStartDate = parsed
     }
 
     const isImmediate = resolvedStartDate <= nowIST.plus({ minutes: 5 })

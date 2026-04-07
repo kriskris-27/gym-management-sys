@@ -14,11 +14,13 @@ export function useMembers(options?: {
   status?: string
   page?: number
   limit?: number
+  live?: boolean
 }) {
   const search = options?.search
   const status = options?.status
   const page = options?.page ?? 1
   const limit = options?.limit ?? 50
+  const live = options?.live ?? false
 
   return useQuery({
     queryKey: ["members", search ?? "", status ?? "", page, limit],
@@ -28,23 +30,30 @@ export function useMembers(options?: {
       if (status) params.set("status", status)
       params.set("page", String(page))
       params.set("limit", String(limit))
-      const res = await fetch(`/api/members?${params.toString()}`)
+      const res = await fetch(`/api/members?${params.toString()}`, {
+        cache: "no-store",
+      })
       if (!res.ok) throw new Error("Failed to fetch members")
       return res.json() as Promise<MembersListResponse>
     },
-    staleTime: 60 * 1000,
+    staleTime: live ? 0 : 60 * 1000,
+    refetchInterval: live ? 1000 : false,
+    refetchOnWindowFocus: true,
   })
 }
 
-export function useMember(id: string) {
+export function useMember(id: string, options?: { live?: boolean }) {
+  const live = options?.live ?? false
   return useQuery({
     queryKey: ["member", id],
     queryFn: async () => {
-      const res = await fetch(`/api/members/${id}`)
+      const res = await fetch(`/api/members/${id}`, { cache: "no-store" })
       if (!res.ok) throw new Error("Failed to fetch member")
       return res.json()
     },
-    staleTime: 60 * 1000,
+    staleTime: live ? 0 : 60 * 1000,
+    refetchInterval: live ? 1000 : false,
+    refetchOnWindowFocus: true,
     enabled: !!id,
   })
 }

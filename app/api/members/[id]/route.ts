@@ -1,23 +1,49 @@
 import { NextResponse } from "next/server"
+import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { MemberUpdateSchema } from "@/lib/validations"
 import { syncMemberOperationalStatus } from "@/domain/subscription"
-import { deriveMemberPlanState } from "@/domain/member-status"
+import {
+  deriveMemberPlanState,
+  type MemberPlanStateSnapshot,
+} from "@/domain/member-status"
+import { computeMemberFinancials, emptyMemberFinancials } from "@/lib/financial-service"
 import {
   cancelMemberPlan,
   MemberLifecycleError,
   renewOrSwitchMemberPlan,
   restoreMember,
+  softDeleteMember,
 } from "@/domain/member-lifecycle"
 
+class MemberCreateBizError extends Error {
+  readonly status: number
+  readonly code: string
+
+  constructor(status: number, code: string, message: string) {
+    super(message)
+    this.name = "MemberCreateBizError"
+    this.status = status
+    this.code = code
+  }
+}
+
+const memberDetailPlanStateFallback: MemberPlanStateSnapshot = {
+  planUiState: "NEEDS_PLAN",
+  displaySubscription: null,
+}
+
 /**
- * GET: Retrieve single member with attendance stats
+ * GET: Retrieve single member with attendance stats (read-only; no operational status sync).
  * Guards: Excludes DELETED members
  */
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuthUser("GET /api/members/[id]")
+  if (!auth.ok) return auth.response
+
   try {
     const { id } = await params
 
@@ -39,24 +65,40 @@ export async function GET(
       },
     })
 
-    // Block deleted members
     if (!member || member.status === "DELETED") {
-      return NextResponse.json({ error: "Member not found" }, { status: 404 })
+      return NextResponse.json(
+        { error: "Member not found", code: "MEMBER_NOT_FOUND" },
+        { status: 404 }
+      )
     }
 
     const { _count, sessions, ...memberData } = member
-    const { computeMemberFinancials } = await import("@/lib/financial-service")
-    const [financials, planState, syncedStatus] = await Promise.all([
-      computeMemberFinancials(id),
-      deriveMemberPlanState(id),
-      syncMemberOperationalStatus(id),
-    ])
+
+    let financials = emptyMemberFinancials()
+    try {
+      financials = await computeMemberFinancials(id)
+    } catch (finErr) {
+      console.error(
+        `❌ Member GET: computeMemberFinancials failed for ${id}, returning empty ledger`,
+        finErr
+      )
+    }
+
+    let planState = memberDetailPlanStateFallback
+    try {
+      planState = await deriveMemberPlanState(id)
+    } catch (planErr) {
+      console.error(
+        `❌ Member GET: deriveMemberPlanState failed for ${id}, using fallback plan UI`,
+        planErr
+      )
+    }
+
     const displaySub = planState.displaySubscription
 
     return NextResponse.json({
       member: {
         ...memberData,
-        status: syncedStatus,
         ...financials,
         membershipType: displaySub?.planNameSnapshot || "NONE",
         subscriptionStatus: displaySub?.status || "INACTIVE",
@@ -70,7 +112,13 @@ export async function GET(
     })
   } catch (error) {
     console.error("❌ Member GET Error:", error)
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: "Could not retrieve member",
+        code: "MEMBER_GET_FAILED",
+      },
+      { status: 500 }
+    )
   }
 }
 
@@ -82,45 +130,92 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuthUser("PUT /api/members/[id]")
+  if (!auth.ok) return auth.response
+
   try {
     const { id } = await params
-    const body = await request.json()
-    
-    // Validate with Zod
-    const validated = MemberUpdateSchema.safeParse({ ...body, id })
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON body", code: "INVALID_JSON" },
+        { status: 400 }
+      )
+    }
+
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { error: "Expected JSON object body", code: "INVALID_BODY" },
+        { status: 400 }
+      )
+    }
+
+    const validated = MemberUpdateSchema.safeParse({
+      ...(body as Record<string, unknown>),
+      id,
+    })
     if (!validated.success) {
-      return NextResponse.json({ 
-        error: validated.error.issues[0].message 
-      }, { status: 400 })
+      const issues = validated.error.issues.map((issue) => ({
+        path: issue.path.map((p) => String(p)),
+        message: issue.message,
+        code: issue.code,
+      }))
+      return NextResponse.json(
+        {
+          error: issues[0]?.message ?? "Validation failed",
+          code: "VALIDATION",
+          issues,
+        },
+        { status: 400 }
+      )
     }
 
     const updateData = validated.data
 
-    // 1. Core lookup (Ensures member exists and isn't deleted)
     const existingMember = await prisma.member.findUnique({
       where: { id },
       include: {
         subscriptions: {
-          orderBy: { createdAt: 'desc' },
-          take: 1
-        }
-      }
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
     })
 
     if (!existingMember || existingMember.status === "DELETED") {
-      return NextResponse.json({ error: "Member not found" }, { status: 404 })
+      return NextResponse.json(
+        { error: "Member not found", code: "MEMBER_NOT_FOUND" },
+        { status: 404 }
+      )
     }
 
-    // 2. Perform update in a transaction to handle member and subscription
+    const wantsPlanUpdate =
+      updateData.membershipType != null ||
+      updateData.startDate != null ||
+      updateData.endDate != null
+
+    if (wantsPlanUpdate && !existingMember.subscriptions[0]) {
+      return NextResponse.json(
+        {
+          error: "No subscription on file; use member signup or renew to add a plan.",
+          code: "NO_SUBSCRIPTION_FOR_PLAN_UPDATE",
+        },
+        { status: 400 }
+      )
+    }
+
     const updatedMember = await prisma.$transaction(async (tx) => {
-      // A. Update core member data
       const m = await tx.member.update({
         where: { id },
         data: {
           name: updateData.name,
           phone: updateData.phone,
-          phoneNormalized: updateData.phone ? updateData.phone.replace(/\D/g, '') : undefined,
-          status: updateData.status === "DELETED" ? "DELETED" : undefined
+          phoneNormalized: updateData.phone
+            ? updateData.phone.replace(/\D/g, "")
+            : undefined,
+          status: updateData.status === "DELETED" ? "DELETED" : undefined,
         },
         select: {
           id: true,
@@ -133,88 +228,117 @@ export async function PUT(
         },
       })
 
-      // B. Update subscription if relevant fields are provided
-      if (updateData.membershipType || updateData.startDate || updateData.endDate) {
-        const latestSub = existingMember.subscriptions[0]
+      if (wantsPlanUpdate) {
+        const latestSub = existingMember.subscriptions[0]!
 
-        if (latestSub) {
-          // If membershipType changed, we might need plan details
-          let planId = latestSub.planId
-          let planName = latestSub.planNameSnapshot
-          let finalPrice = latestSub.planPriceSnapshot
+        let planId = latestSub.planId
+        let planName = latestSub.planNameSnapshot
+        let finalPrice = latestSub.planPriceSnapshot
 
-          if (updateData.membershipType && updateData.membershipType !== latestSub.planNameSnapshot) {
-            if (updateData.membershipType === "OTHERS") {
-              let othersPlan = await tx.plan.findUnique({ where: { name: "OTHERS" } })
-              if (!othersPlan) {
-                othersPlan = await tx.plan.create({
-                  data: { name: "OTHERS", price: 0, durationDays: 1, isActive: true }
-                })
-              }
-              planId = othersPlan.id
-              planName = updateData.manualPlanName || "Others"
-              finalPrice = updateData.manualAmount || latestSub.planPriceSnapshot || 0
-            } else {
-              const plan = await tx.plan.findUnique({
-                where: { name: updateData.membershipType }
+        if (
+          updateData.membershipType &&
+          updateData.membershipType !== latestSub.planNameSnapshot
+        ) {
+          if (updateData.membershipType === "OTHERS") {
+            let othersPlan = await tx.plan.findUnique({ where: { name: "OTHERS" } })
+            if (!othersPlan) {
+              othersPlan = await tx.plan.create({
+                data: {
+                  name: "OTHERS",
+                  price: 0,
+                  durationDays: 1,
+                  isActive: true,
+                },
               })
-              if (plan) {
-                planId = plan.id
-                planName = plan.name
-                finalPrice = plan.price
-              }
             }
-          } else if (updateData.membershipType === "OTHERS") {
-            // Updating existing OTHERS plan details
-            if (updateData.manualPlanName) planName = updateData.manualPlanName
-            if (updateData.manualAmount !== undefined) finalPrice = updateData.manualAmount
-          }
-
-          // CHECK: Can we update the snapshot price? 
-          const paymentsCount = await tx.payment.count({
-            where: { subscriptionId: latestSub.id, status: 'SUCCESS' }
-          })
-          
-          const isPriceChanging = finalPrice !== latestSub.planPriceSnapshot
-          
-          if (isPriceChanging && paymentsCount > 0) {
-            throw new Error("Cannot change plan price because payments have already been recorded. Cancel and create a new plan if a price adjustment is needed.")
-          }
-
-          await tx.subscription.update({
-            where: { id: latestSub.id },
-            data: {
-              planId,
-              planNameSnapshot: planName,
-              planPriceSnapshot: finalPrice, 
-              startDate: updateData.startDate,
-              endDate: updateData.endDate
+            planId = othersPlan.id
+            planName = updateData.manualPlanName || "Others"
+            finalPrice = updateData.manualAmount ?? latestSub.planPriceSnapshot ?? 0
+          } else {
+            const plan = await tx.plan.findUnique({
+              where: { name: updateData.membershipType },
+            })
+            if (plan) {
+              planId = plan.id
+              planName = plan.name
+              finalPrice = plan.price
             }
-          })
+          }
+        } else if (updateData.membershipType === "OTHERS") {
+          if (updateData.manualPlanName) planName = updateData.manualPlanName
+          if (updateData.manualAmount !== undefined)
+            finalPrice = updateData.manualAmount
         }
+
+        const base = Math.round(finalPrice)
+        const discount = Math.round(updateData.discountAmount ?? 0)
+        if (discount > base) {
+          throw new MemberCreateBizError(
+            400,
+            "DISCOUNT_EXCEEDS_BASE",
+            `Discount (₹${discount}) cannot exceed base price (₹${base}).`
+          )
+        }
+
+        const paymentsCount = await tx.payment.count({
+          where: { subscriptionId: latestSub.id, status: "SUCCESS" },
+        })
+
+        const isPriceChanging = finalPrice !== latestSub.planPriceSnapshot
+
+        if (isPriceChanging && paymentsCount > 0) {
+          throw new MemberCreateBizError(
+            400,
+            "PRICE_CHANGE_BLOCKED",
+            "Cannot change plan price because payments have already been recorded. Cancel and create a new plan if a price adjustment is needed."
+          )
+        }
+
+        await tx.subscription.update({
+          where: { id: latestSub.id },
+          data: {
+            planId,
+            planNameSnapshot: planName,
+            planPriceSnapshot: finalPrice,
+            startDate: updateData.startDate,
+            endDate: updateData.endDate,
+          },
+        })
       }
 
       await syncMemberOperationalStatus(id, tx)
       return m
     })
 
-
-    return NextResponse.json({ member: updatedMember })
-
+    return NextResponse.json({
+      member: updatedMember,
+      code: "MEMBER_UPDATED",
+    })
   } catch (error) {
     console.error("❌ Member PUT Error:", error)
-    if (error instanceof Error && (error.message.includes("not found") || error.message.includes("Cannot change plan price"))) {
-      return NextResponse.json({ error: error.message }, { status: 400 })
+    if (error instanceof MemberCreateBizError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      )
     }
-    // Catch-all for duplicate phone numbers across different IDs
     if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
       return NextResponse.json(
-        { error: "Member with this phone already exists" }, 
+        {
+          error: "Member with this phone already exists",
+          code: "DUPLICATE_PHONE",
+        },
         { status: 409 }
       )
     }
 
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: "Could not update member",
+        code: "MEMBER_UPDATE_FAILED",
+      },
+      { status: 500 }
+    )
   }
 }
 /**
@@ -225,30 +349,29 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuthUser("DELETE /api/members/[id]")
+  if (!auth.ok) return auth.response
+
   try {
     const { id } = await params
-
-    const member = await prisma.member.findUnique({
-      where: { id }
+    await softDeleteMember(id)
+    return NextResponse.json({
+      success: true,
+      code: "MEMBER_DELETED",
     })
-
-    if (!member || member.status === "DELETED") {
-      return NextResponse.json(
-        { error: "Member not found" },
-        { status: 404 }
-      )
-    }
-
-    await prisma.member.update({
-      where: { id },
-      data: { status: "DELETED" }
-    })
-
-    return NextResponse.json({ success: true })
   } catch (error) {
     console.error("❌ Member DELETE Error:", error)
+    if (error instanceof MemberLifecycleError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      )
+    }
     return NextResponse.json(
-      { error: "Internal Server Error" },
+      {
+        error: "Could not delete member",
+        code: "MEMBER_DELETE_FAILED",
+      },
       { status: 500 }
     )
   }
@@ -261,6 +384,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuthUser("PATCH /api/members/[id]")
+  if (!auth.ok) return auth.response
+
   try {
     const { id } = await params
     let body: unknown
@@ -315,6 +441,7 @@ export async function PATCH(
       const res = await renewOrSwitchMemberPlan(id, {
         action: action as "renew" | "switch",
         membershipType: validated.data.membershipType,
+        startDate: validated.data.startDate,
         endDate: validated.data.endDate,
         customPrice: validated.data.customPrice,
         manualPlanName: validated.data.manualPlanName,
@@ -344,8 +471,8 @@ export async function PATCH(
     console.error("❌ Member PATCH Error:", error)
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Internal Server Error",
-        code: "INTERNAL",
+        error: "Could not complete this action",
+        code: "MEMBER_PATCH_FAILED",
       },
       { status: 500 }
     )
