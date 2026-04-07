@@ -22,7 +22,10 @@ export async function POST(request: Request) {
   if (rateLimit) {
     if (nowMs - rateLimit.start < 60000) {
       if (rateLimit.count >= 10) {
-        return NextResponse.json({ error: "Too many attempts" }, { status: 429 })
+        return NextResponse.json(
+          { error: "Too many attempts", code: "RATE_LIMITED" },
+          { status: 429 }
+        )
       }
       rateLimit.count++
     } else {
@@ -35,7 +38,12 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
     const validated = AttendanceScanSchema.safeParse(body)
-    if (!validated.success) return NextResponse.json({ error: "Invalid phone" }, { status: 400 })
+    if (!validated.success) {
+      return NextResponse.json(
+        { error: "Invalid phone", code: "VALIDATION" },
+        { status: 400 }
+      )
+    }
 
     const { phone } = validated.data
 
@@ -47,10 +55,11 @@ export async function POST(request: Request) {
       status: result.state,
       message: result.message,
       memberName: result.memberName,
-      checkedInAt: result.checkInAt,
-      checkedOutAt: result.checkOutAt,
-      durationMinutes: result.durationMinutes,
-      durationFormatted: result.durationFormatted,
+      checkedInAt: result.checkInAt ?? null,
+      checkedOutAt: result.checkOutAt ?? null,
+      durationMinutes: result.durationMinutes ?? null,
+      durationFormatted: result.durationFormatted ?? null,
+      isExpired: false,
       sessionId: result.sessionId,
       autoClosed: result.autoClosed,
       closeReason: result.closeReason,
@@ -59,22 +68,25 @@ export async function POST(request: Request) {
     // 4. RETURN APPROPRIATE HTTP STATUS
     switch (result.state) {
       case "NOT_FOUND":
-        return NextResponse.json(response, { status: 404 })
+        return NextResponse.json({ ...response, code: "NOT_FOUND" }, { status: 404 })
       case "INACTIVE":
-        return NextResponse.json(response, { status: 403 })
+        return NextResponse.json({ ...response, code: "MEMBER_INACTIVE" }, { status: 403 })
       default:
         return NextResponse.json(response)
     }
 
   } catch (error) {
     console.error("❌ Scan Error:", error)
-    return NextResponse.json({ error: "Internal Error" }, { status: 500 })
+    return NextResponse.json(
+      { error: "Internal Error", code: "ATTENDANCE_SCAN_FAILED" },
+      { status: 500 }
+    )
   }
 }
 
 export async function GET() {
   return NextResponse.json(
-    { error: "Method Not Allowed" },
+    { error: "Method Not Allowed", code: "METHOD_NOT_ALLOWED" },
     { status: 405, headers: { Allow: "POST" } }
   )
 }

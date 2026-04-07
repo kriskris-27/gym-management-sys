@@ -106,3 +106,82 @@ export function formatMemberDateTime(isoStr: string | null | undefined): string 
   const d = DateTime.fromISO(isoStr, { zone: "utc" }).setZone(GYM_TIMEZONE)
   return d.isValid ? d.toFormat("d MMM yyyy 'at' h:mm a") : "-"
 }
+
+/**
+ * Calendar date for `AttendanceSession.sessionDay` (@db.Date) — IST “today”, aligned with kiosk scan.
+ */
+export function getTodaySessionDayJS(): Date {
+  return DateTime.now().setZone(GYM_TIMEZONE).startOf("day").toJSDate()
+}
+
+/** Parse `YYYY-MM-DD` query params as IST calendar day for `sessionDay` range filters. */
+export function parseISTDateToSessionDay(isoDate: string): Date {
+  const normalized = isoDate.length === 10 ? `${isoDate}T00:00:00` : isoDate
+  return DateTime.fromISO(normalized, { zone: GYM_TIMEZONE }).startOf("day").toJSDate()
+}
+
+export function parseISTSessionDayRange(
+  start?: string | null,
+  end?: string | null
+): { gte?: Date; lte?: Date } | undefined {
+  if (!start?.trim() && !end?.trim()) return undefined
+  const range: { gte?: Date; lte?: Date } = {}
+  if (start?.trim()) range.gte = parseISTDateToSessionDay(start.trim())
+  if (end?.trim()) range.lte = parseISTDateToSessionDay(end.trim())
+  return range
+}
+
+// ---------------------------------------------------------------------------
+// App-wide gym timezone (IST) — use these for UI instead of manual UTC offsets
+// ---------------------------------------------------------------------------
+
+/** Current instant in the gym zone (Luxon). */
+export function gymNow(): DateTime {
+  return DateTime.now().setZone(GYM_TIMEZONE)
+}
+
+/**
+ * Parse a calendar `YYYY-MM-DD` string as a gym-local date (start of that day).
+ * Returns null if the string is not a valid gym date.
+ */
+export function parseGymDateOnly(ymd: string): DateTime | null {
+  const s = ymd.trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null
+  const d = DateTime.fromISO(s, { zone: GYM_TIMEZONE }).startOf("day")
+  return d.isValid ? d : null
+}
+
+/** Long weekday label for a gym calendar day, e.g. "Wednesday, 8 April 2026". */
+export function formatGymDateLong(dt: DateTime): string {
+  return dt.setZone(GYM_TIMEZONE).toFormat("cccc, d LLLL yyyy")
+}
+
+/** Format an instant (ISO string from DB) as time in the gym zone. */
+export function formatGymTime(isoOrDate: string | Date | null | undefined): string {
+  if (isoOrDate == null) return "—"
+  const d =
+    typeof isoOrDate === "string"
+      ? DateTime.fromISO(isoOrDate, { zone: "utc" }).setZone(GYM_TIMEZONE)
+      : DateTime.fromJSDate(isoOrDate, { zone: "utc" }).setZone(GYM_TIMEZONE)
+  return d.isValid ? d.toFormat("h:mm a") : "—"
+}
+
+/** Format an instant as date + time in the gym zone. */
+export function formatGymDateTime(isoOrDate: string | Date | null | undefined): string {
+  if (isoOrDate == null) return "—"
+  const d =
+    typeof isoOrDate === "string"
+      ? DateTime.fromISO(isoOrDate, { zone: "utc" }).setZone(GYM_TIMEZONE)
+      : DateTime.fromJSDate(isoOrDate, { zone: "utc" }).setZone(GYM_TIMEZONE)
+  return d.isValid ? d.toFormat("d MMM yyyy 'at' h:mm a") : "—"
+}
+
+/** Live clock string for headers, e.g. "3:45:02 PM". */
+export function formatGymClock(dt?: DateTime): string {
+  return (dt ?? gymNow()).toFormat("h:mm:ss a")
+}
+
+/** First calendar day of the month in the gym zone as `YYYY-MM-DD`. */
+export function firstDayOfMonthYmdInGym(): string {
+  return gymNow().startOf("month").toFormat("yyyy-LL-dd")
+}

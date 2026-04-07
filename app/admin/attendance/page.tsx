@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import { useAttendanceToday } from "@/hooks/useAttendance";
 import { useAttendanceScan } from "@/hooks/useAttendanceScan";
+import { formatDuration } from "@/lib/utils";
+import { formatGymDateLong, formatGymTime, gymNow } from "@/lib/gym-datetime";
 
 interface PaymentSummary {
   dueAmount: number;
@@ -30,32 +32,8 @@ interface AttendanceData {
   records: AttendanceRecord[];
 }
 
-function formatTime(isoStr: string): string {
-  return new Date(isoStr).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-function formatDuration(mins: number): string {
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h === 0) return `${m}min`;
-  if (m === 0) return `${h}hr`;
-  return `${h}hr ${m}min`;
-}
-
 function getTodayLabel(): string {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const ist = new Date(now.getTime() + istOffset);
-  return ist.toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  return formatGymDateLong(gymNow());
 }
 
 export default function AttendancePage() {
@@ -144,14 +122,13 @@ export default function AttendancePage() {
   const completedSessions = (data?.records ?? []).filter(
     (r) => r.durationMinutes !== null && r.checkedOutAt,
   );
+  /** Mean duration in minutes (fractional); do not floor — short sessions average to <1 min. */
   const avgDuration =
     completedSessions.length > 0
-      ? Math.floor(
-          completedSessions.reduce(
-            (sum, r) => sum + (r.durationMinutes ?? 0),
-            0,
-          ) / completedSessions.length,
-        )
+      ? completedSessions.reduce(
+          (sum, r) => sum + (r.durationMinutes ?? 0),
+          0,
+        ) / completedSessions.length
       : null;
 
   const currentlyInside = (data?.records ?? []).filter(
@@ -449,7 +426,7 @@ export default function AttendancePage() {
                       {/* Check In */}
                       <td className="px-5 py-4">
                         <span className="text-[#666666] text-[12px]">
-                          {formatTime(record.checkedInAt)}
+                          {formatGymTime(record.checkedInAt)}
                         </span>
                       </td>
 
@@ -457,7 +434,7 @@ export default function AttendancePage() {
                       <td className="px-5 py-4">
                         {record.checkedOutAt ? (
                           <span className="text-[#666666] text-[12px]">
-                            {formatTime(record.checkedOutAt)}
+                            {formatGymTime(record.checkedOutAt)}
                           </span>
                         ) : (
                           <span className="text-[#333333] text-[12px]">—</span>

@@ -107,14 +107,22 @@ export function calcDuration(startTime: DateTime, endTime: DateTime): number {
 }
 
 /**
- * Format duration from minutes to human readable format
+ * Format duration from fractional minutes (e.g. Luxon diff) to a readable string.
+ * Under 1 minute → seconds; otherwise minutes/hours with seconds when needed.
  */
 export function formatDuration(minutes: number): string {
-  if (minutes < 60) return `${Math.round(minutes)}m`
-  
-  const hours = Math.floor(minutes / 60)
-  const remainingMinutes = Math.round(minutes % 60)
-  return `${hours}h ${remainingMinutes}m`
+  if (!Number.isFinite(minutes) || minutes < 0) return "—"
+  const totalSeconds = Math.round(minutes * 60)
+  if (totalSeconds < 60) return totalSeconds < 1 ? "<1s" : `${totalSeconds}s`
+
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+
+  if (h > 0) {
+    return s > 0 ? `${h}h ${m}m ${s}s` : `${h}h ${m}m`
+  }
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
 }
 
 // ========================================

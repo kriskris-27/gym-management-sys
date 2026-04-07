@@ -1,8 +1,14 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useDashboard } from "@/hooks/useDashboard"
-import { getDisplayDateTime, logIndiaTime, fromISO, nowUTC } from "@/lib/utils"
+import {
+  formatGymClock,
+  formatGymDateLong,
+  formatGymTime,
+  parseGymDateOnly,
+  GYM_TIMEZONE,
+} from "@/lib/gym-datetime"
 
 interface Member {
   id: string
@@ -18,6 +24,7 @@ interface Attendance {
   checkedInAt: string
   checkedOutAt: string | null
   durationMinutes: number | null
+  durationFormatted?: string
   autoClosed: boolean
 }
 
@@ -46,41 +53,22 @@ interface DashboardData {
 export default function DashboardPage() {
   const { data: rawData, isLoading: loading, refetch } = useDashboard()
   const data = rawData as DashboardData | undefined
-  const fetchData = () => { refetch() }
+  const fetchData = () => {
+    refetch()
+  }
 
-  // Debug: Log current India time immediately with Luxon
-  const currentIndiaTime = nowUTC().setZone('Asia/Kolkata').toFormat('h:mm:ss a')
-  console.log(`🕐 CURRENT INDIA TIME: ${currentIndiaTime}`)
+  const [istClock, setIstClock] = useState(() => formatGymClock())
 
-  // Format date using centralized Luxon utilities (single source of truth)
-  const formattedDate = (() => {
+  useEffect(() => {
+    const id = setInterval(() => setIstClock(formatGymClock()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const headerDateLabel = useMemo(() => {
     if (!data?.today?.date) return "Loading..."
-    
-    const serverDate = fromISO(data.today.date)
-    
-    // Log current India time (not server time)
-    logIndiaTime()  // This will use DateTime.now() by default
-    
-    return getDisplayDateTime(serverDate)
-  })()
-
-  // Helper to display duration (backend-calculated only)
-  const getDurationString = (record: Attendance) => {
-    if (!record.durationMinutes) return "ongoing"
-    
-    const minutes = record.durationMinutes
-    const hrs = Math.floor(minutes / 60)
-    const rMins = Math.floor(minutes % 60)
-    
-    if (hrs === 0) return `${rMins}m`
-    return `${hrs}h ${rMins}m`
-  }
-
-  // Helper to parse time string (using centralized utility)
-  const getTimeString = (isoString?: string | null) => {
-    if (!isoString) return "-"
-    return getDisplayTimeString(fromISO(isoString))
-  }
+    const d = parseGymDateOnly(data.today.date)
+    return d ? formatGymDateLong(d) : data.today.date
+  }, [data?.today?.date])
 
   return (
     <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 overflow-x-hidden">
@@ -102,7 +90,11 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-white text-[28px] font-black tracking-tight">Dashboard</h1>
-          <p className="text-[#444444] text-[13px]">{formattedDate}</p>
+          <p className="text-[#444444] text-[13px]">{headerDateLabel}</p>
+          <p className="text-[#333333] text-[11px] mt-0.5 font-mono tabular-nums">
+            {istClock}{" "}
+            <span className="text-[#444444]">({GYM_TIMEZONE})</span>
+          </p>
         </div>
         <div className="bg-[#D11F00]/10 text-[#D11F00] text-[10px] font-bold tracking-[0.15em] uppercase px-3 py-1 rounded-full flex items-center gap-2 self-start sm:self-auto border border-[#D11F00]/20">
           <div className="w-1.5 h-1.5 bg-[#D11F00] rounded-full dot-pulse" />
@@ -218,13 +210,15 @@ export default function DashboardPage() {
                               {record.memberName}
                             </td>
                             <td className="py-3.5 border-b border-[#0D0D0D] text-[#888888] text-[13px] whitespace-nowrap pr-4">
-                              {getTimeString(record.checkedInAt)}
+                              {formatGymTime(record.checkedInAt)}
                             </td>
                             <td className="py-3.5 border-b border-[#0D0D0D] text-[#888888] text-[13px] whitespace-nowrap pr-4">
-                              {getTimeString(record.checkedOutAt)}
+                              {formatGymTime(record.checkedOutAt)}
                             </td>
                             <td className="py-3.5 border-b border-[#0D0D0D] text-white text-[13px] font-mono pr-4">
-                              {getDurationString(record)}
+                              {!record.checkedOutAt && !record.autoClosed
+                                ? "ongoing"
+                                : (record.durationFormatted ?? "-")}
                             </td>
                             <td className="py-3.5 border-b border-[#0D0D0D] text-right whitespace-nowrap">
                               {isOngoing ? (

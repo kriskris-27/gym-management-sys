@@ -3,16 +3,13 @@
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
 import { useMonthlyReport } from "@/hooks/useReports"
+import { gymNow } from "@/lib/gym-datetime"
 
-const istOffset = 5.5 * 60 * 60 * 1000
-function getISTNow() {
-  return new Date(Date.now() + istOffset)
-}
 function currentISTYear() {
-  return getISTNow().getUTCFullYear()
+  return gymNow().year
 }
 function currentISTMonth() {
-  return getISTNow().getUTCMonth() + 1
+  return gymNow().month
 }
 
 const BarChart = dynamic(

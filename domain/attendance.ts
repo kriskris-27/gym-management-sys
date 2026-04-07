@@ -1,8 +1,10 @@
 import { prisma } from "../lib/prisma"
-import { getISTDateRange, calcDuration, formatDuration, fromDate, nowUTC } from "../lib/utils"
+import type { Prisma } from "@prisma/client"
+import { calcDuration, formatDuration, fromDate, nowUTC } from "../lib/utils"
 import { DateTime } from "luxon"
 import {
   formatMemberDate,
+  getTodaySessionDayJS,
   isMembershipEndPast,
   isMembershipStartInFutureIST,
 } from "../lib/gym-datetime"
@@ -131,7 +133,7 @@ export async function scanMember(
       const existingSession = await tx.attendanceSession.findFirst({
         where: { 
           memberId: member.id,
-          sessionDay: getISTDateRange().startOfTodayIST.toJSDate(),
+          sessionDay: getTodaySessionDayJS(),
           checkOut: null // Only open sessions
         },
         orderBy: { checkIn: 'desc' }
@@ -169,14 +171,14 @@ export async function scanMember(
     }
 
 
-    // Step 3: Get IST date range and today's session
-    const { startOfTodayIST } = getISTDateRange()
-    
+    // Step 3: Today's sessionDay (IST calendar day — same as dashboard "today")
+    const todaySessionDay = getTodaySessionDayJS()
+
     // Step 4: Get today's session using sessionDay (SOURCE OF TRUTH)
     let todaySession = await tx.attendanceSession.findFirst({
       where: { 
         memberId: member.id,
-        sessionDay: startOfTodayIST.toJSDate()
+        sessionDay: todaySessionDay
       },
       orderBy: { checkIn: 'desc' } // Use checkIn field
     })
@@ -188,7 +190,7 @@ export async function scanMember(
         const newSession = await tx.attendanceSession.create({
           data: { 
             memberId: member.id, 
-            sessionDay: startOfTodayIST.toJSDate(), 
+            sessionDay: todaySessionDay, 
             checkIn: now.toJSDate(), 
             status: 'OPEN',
             source: 'KIOSK'
@@ -214,7 +216,7 @@ export async function scanMember(
           todaySession = await tx.attendanceSession.findFirst({
             where: { 
               memberId: member.id,
-              sessionDay: startOfTodayIST.toJSDate()
+              sessionDay: todaySessionDay
             }
           })
         } else {
@@ -294,14 +296,14 @@ export async function cleanupOldSessionsInTransaction(
   now: DateTime,
   tx: PrismaTransaction
 ): Promise<number> {
-  const { startOfTodayIST } = getISTDateRange()
-  
+  const todaySessionDay = getTodaySessionDayJS()
+
   const oldOpenSessions = await tx.attendanceSession.findMany({
     where: {
       memberId,
       checkOut: null,
       sessionDay: {
-        lt: startOfTodayIST.toJSDate()
+        lt: todaySessionDay
       }
     },
     take: CLEANUP_LIMIT_PER_MEMBER,
@@ -423,17 +425,17 @@ export async function getMemberAttendanceHistory(
 ): Promise<AttendanceSession[]> {
   console.log(`[Attendance Domain] Getting attendance history for member: ${memberId}`)
   
-  const where: { 
-    memberId: string
-    autoClosed?: boolean
-    sessionDay?: { gte?: Date; lte?: Date }
-  } = { memberId }
+  const where: Prisma.AttendanceSessionWhereInput = {
+    memberId,
+    member: { status: { not: "DELETED" } },
+  }
   
   // Filter by sessionDay (not date) - SOURCE OF TRUTH
   if (startDate || endDate) {
-    where.sessionDay = {}
-    if (startDate) where.sessionDay.gte = startDate
-    if (endDate) where.sessionDay.lte = endDate
+    where.sessionDay = {
+      ...(startDate ? { gte: startDate } : {}),
+      ...(endDate ? { lte: endDate } : {}),
+    }
   }
 
   // Filter out auto-closed sessions unless explicitly requested
@@ -457,7 +459,8 @@ export async function getMemberAttendanceHistory(
 
 /**
  * Get attendance statistics with correct valid/invalid classification
- * FIX: Proper valid session definition
+ * Valid = completed checkout, not auto-closed, member not deleted.
+ * Invalid = open (no checkout) or auto-closed, same date/member scope.
  */
 export async function getAttendanceStats(
   memberId?: string,
@@ -474,67 +477,87 @@ export async function getAttendanceStats(
 }> {
   console.log(`[Attendance Domain] Getting attendance stats`)
 
-  // Get valid sessions (FIX: correct definition)
-  const validWhere: { 
-    memberId?: string
-    sessionDay?: { gte?: Date; lte?: Date }
-  } = {}
-  if (memberId) validWhere.memberId = memberId
+  const rangeFilter: Prisma.AttendanceSessionWhereInput = {}
   if (startDate || endDate) {
-    validWhere.sessionDay = {}
-    if (startDate) (validWhere.sessionDay as any).gte = startDate
-    if (endDate) (validWhere.sessionDay as any).lte = endDate
+    rangeFilter.sessionDay = {
+      ...(startDate ? { gte: startDate } : {}),
+      ...(endDate ? { lte: endDate } : {}),
+    }
   }
 
-  const validSessions = await prisma.attendanceSession.findMany({
-    where: validWhere
-  })
-
-  // Filter for valid sessions
-  const filteredValidSessions = validSessions.filter((session: typeof validSessions[0]): session is typeof session & { checkOut: Date } => 
-    session.checkOut !== null && !session.autoClosed
-  )
-
-  // Get invalid sessions (FIX: correct definition)
-  const invalidWhere: { 
-    OR: ({ autoClosed: boolean } | { checkOut: null })[]
-    memberId?: string
-    sessionDay?: { gte?: Date; lte?: Date }
-  } = {
-    OR: [
-      { autoClosed: true },
-      { checkOut: null } // Use checkOut field
-    ]
+  const memberScope: Prisma.AttendanceSessionWhereInput = {
+    ...rangeFilter,
+    member: { status: { not: "DELETED" } },
+    ...(memberId ? { memberId } : {}),
   }
 
-  if (memberId) invalidWhere.memberId = memberId
-  if (startDate || endDate) {
-    invalidWhere.sessionDay = {}
-    if (startDate) (invalidWhere.sessionDay as any).gte = startDate
-    if (endDate) (invalidWhere.sessionDay as any).lte = endDate
+  const validWhere: Prisma.AttendanceSessionWhereInput = {
+    ...memberScope,
+    checkOut: { not: null },
+    autoClosed: false,
   }
 
-  const invalidSessions = await prisma.attendanceSession.count({
-    where: invalidWhere
-  })
+  const invalidWhere: Prisma.AttendanceSessionWhereInput = {
+    ...memberScope,
+    OR: [{ autoClosed: true }, { checkOut: null }],
+  }
 
-  // Calculate statistics
-  const totalSessions = filteredValidSessions.length
-  const totalMinutes = filteredValidSessions.reduce((sum: number, session: AttendanceSession) => {
-    const duration = session.checkOut ? calcDuration(fromDate(session.checkIn), fromDate(session.checkOut)) : 0
-    return sum + duration
+  const [validRows, invalidSessions] = await Promise.all([
+    prisma.attendanceSession.findMany({
+      where: validWhere,
+      select: { checkIn: true, checkOut: true },
+    }),
+    prisma.attendanceSession.count({ where: invalidWhere }),
+  ])
+
+  const validSessions = validRows.length
+  const totalMinutes = validRows.reduce((sum, session) => {
+    if (!session.checkOut) return sum
+    return sum + calcDuration(fromDate(session.checkIn), fromDate(session.checkOut))
   }, 0)
-  const avgMinutes = totalSessions > 0 ? Math.round(totalMinutes / totalSessions) : 0
+  const avgMinutes = validSessions > 0 ? Math.round(totalMinutes / validSessions) : 0
 
   return {
-    totalSessions,
-    validSessions: totalSessions,
+    totalSessions: validSessions,
+    validSessions,
     invalidSessions,
     totalMinutes,
     avgMinutes,
     avgHours: Math.floor(avgMinutes / 60),
-    avgRemainingMinutes: avgMinutes % 60
+    avgRemainingMinutes: avgMinutes % 60,
   }
 }
 
+/**
+ * Valid sessions only for admin reports: checkout present, not auto-closed, member not deleted.
+ */
+export async function listValidSessionsForReport(
+  memberId: string | undefined,
+  startDate: Date | undefined,
+  endDate: Date | undefined
+) {
+  const rangeFilter: Prisma.AttendanceSessionWhereInput = {}
+  if (startDate || endDate) {
+    rangeFilter.sessionDay = {
+      ...(startDate ? { gte: startDate } : {}),
+      ...(endDate ? { lte: endDate } : {}),
+    }
+  }
+
+  const where: Prisma.AttendanceSessionWhereInput = {
+    ...rangeFilter,
+    checkOut: { not: null },
+    autoClosed: false,
+    member: { status: { not: "DELETED" } },
+    ...(memberId ? { memberId } : {}),
+  }
+
+  return prisma.attendanceSession.findMany({
+    where,
+    include: {
+      member: { select: { id: true, name: true, phone: true } },
+    },
+    orderBy: { checkIn: "desc" },
+  })
+}
 

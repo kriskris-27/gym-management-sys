@@ -13,6 +13,7 @@ import {
   formatMemberDate,
   formatMemberTime,
   getMembershipDayInfo,
+  todayYmdInIST,
 } from "@/lib/gym-datetime"
 
 interface Member {
@@ -252,12 +253,7 @@ export default function MemberProfilePage() {
   }
 
   // Payment Form Hook
-  const getTodayStr = () => {
-    const now = new Date()
-    const istOffset = 5.5 * 60 * 60 * 1000
-    const istNow = new Date(now.getTime() + istOffset)
-    return istNow.toISOString().split("T")[0]
-  }
+  const getTodayStr = () => todayYmdInIST()
   const { register: regPayment, handleSubmit: handlePaymentSubmit, reset: resetPayment, watch: watchPayment, setValue: setPaymentValue, formState: { errors: payErrors, isSubmitting: isPaying } } = useForm<PaymentFormData>({
     resolver: zodResolver(paymentSchema),
     defaultValues: { date: getTodayStr(), mode: "UPI" }

@@ -4,6 +4,7 @@ import { useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { usePayments } from "@/hooks/usePayments"
+import { firstDayOfMonthYmdInGym, todayYmdInIST } from "@/lib/gym-datetime"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,22 +30,6 @@ interface PaymentSummary {
   totalPaid: number
   remaining: number
   isPaidFull: boolean
-}
-
-// ─── IST Helpers ─────────────────────────────────────────────────────────────
-
-function getTodayIST(): string {
-  const now = new Date()
-  const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000)
-  return istNow.toISOString().split("T")[0]
-}
-
-function firstDayOfMonthIST(): string {
-  const now = new Date()
-  const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000)
-  const year = istNow.getUTCFullYear()
-  const month = String(istNow.getUTCMonth() + 1).padStart(2, "0")
-  return `${year}-${month}-01`
 }
 
 function formatPaymentDate(dateStr: string): string {
@@ -77,8 +62,8 @@ export default function PaymentsPage() {
   // Filters
   const [search, setSearch] = useState("")
   const [modeFilter, setModeFilter] = useState("All")
-  const [dateFrom, setDateFrom] = useState(firstDayOfMonthIST())
-  const [dateTo, setDateTo] = useState(getTodayIST())
+  const [dateFrom, setDateFrom] = useState(firstDayOfMonthYmdInGym())
+  const [dateTo, setDateTo] = useState(todayYmdInIST())
 
   // Modal state
   const [showModal, setShowModal] = useState(false)
@@ -89,7 +74,7 @@ export default function PaymentsPage() {
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)
   const [modalAmount, setModalAmount] = useState("")
-  const [modalDate, setModalDate] = useState(getTodayIST())
+  const [modalDate, setModalDate] = useState(todayYmdInIST())
   const [modalMode, setModalMode] = useState<"CASH" | "UPI" | "CARD">("UPI")
   const [modalNotes, setModalNotes] = useState("")
   const [modalError, setModalError] = useState("")
@@ -180,7 +165,7 @@ export default function PaymentsPage() {
     setSelectedMember(null)
     setSelectedSummary(null)
     setModalAmount("")
-    setModalDate(getTodayIST())
+    setModalDate(todayYmdInIST())
     setModalMode("UPI")
     setModalNotes("")
     setModalError("")

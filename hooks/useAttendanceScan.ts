@@ -5,13 +5,17 @@ import { z } from "zod"
 interface ScanResponse {
   status: "CHECKED_IN" | "CHECKED_OUT" | "ALREADY_DONE" | "NOT_FOUND" | "INACTIVE"
   message: string
-  memberName: string
+  memberName?: string
   checkedInAt: string | null
   checkedOutAt: string | null
   durationMinutes: number | null
   durationFormatted: string | null
-  isExpired: boolean
-  autoReset?: boolean
+  /** Reserved for future use; API may omit */
+  isExpired?: boolean
+  code?: string
+  sessionId?: string
+  autoClosed?: boolean
+  closeReason?: string | null
 }
 
 export function useAttendanceScan() {
@@ -32,7 +36,7 @@ export function useAttendanceScan() {
 
       if (!response.ok) {
         const error = await response.json()
-        throw new Error(error.error || "Scan failed")
+        throw new Error(error.error || error.code || "Scan failed")
       }
 
       return response.json() as Promise<ScanResponse>

@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET
 
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    return NextResponse.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401 })
   }
 
   const now = DateTime.now().setZone("Asia/Kolkata")
@@ -126,20 +126,24 @@ export async function GET(request: Request) {
     const totalClosed = previousDayClosed + maxDurationClosed
 
     console.log(
-      `[Cron] Session cleanup complete: ${previousDayClosed} previous-day, ${maxDurationClosed} max-duration, ${totalClosed} total`
+      `[Cron close-sessions] runId=${now.toMillis()} istDate=${todayStart.toISODate()} previousDay=${previousDayClosed} maxDuration=${maxDurationClosed} total=${totalClosed}`
     )
 
     return NextResponse.json({
       ok: true,
+      code: "CRON_CLOSE_SESSIONS_OK",
       closedSessions: totalClosed,
       previousDay: previousDayClosed,
       maxDuration: maxDurationClosed,
       closingTime: `${String(closingHour).padStart(2, "0")}:${String(closingMinute).padStart(2, "0")}`,
-      runAt: now.toISO()
+      runAt: now.toISO(),
     })
 
   } catch (error) {
     console.error("❌ Cron close-sessions error:", error)
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+    return NextResponse.json(
+      { error: "Cron close-sessions failed", code: "CRON_CLOSE_SESSIONS_FAILED" },
+      { status: 500 }
+    )
   }
 }

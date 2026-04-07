@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
+import { DateTime } from "luxon"
 import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
+import { GYM_TIMEZONE, gymNow } from "@/lib/gym-datetime"
 
 // Type definitions for report data
 interface PaymentWithMember {
@@ -31,23 +33,23 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
 
-  // 1. BASELINE IST CALCULATIONS
-  const istOffset = 5.5 * 60 * 60 * 1000
-  const now = new Date()
-  const istNow = new Date(now.getTime() + istOffset)
-  const istYear = istNow.getUTCFullYear()
-  const istMonth = istNow.getUTCMonth() + 1 // 1-indexed
+  // 1. Baseline gym-zone (IST) calendar month
+  const nowGym = gymNow()
+  const istYear = nowGym.year
+  const istMonth = nowGym.month
 
-  // Parameter Extraction and Safety Validation
-  let year = parseInt(searchParams.get("year") || istYear.toString())
-  let month = parseInt(searchParams.get("month") || istMonth.toString())
+  let year = parseInt(searchParams.get("year") || String(istYear))
+  let month = parseInt(searchParams.get("month") || String(istMonth))
 
   if (isNaN(year) || year < 2020 || year > 2030) year = istYear
   if (isNaN(month) || month < 1 || month > 12) month = istMonth
 
-  const startOfMonth = new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00+05:30`)
-  const startOfNextMonth = new Date(startOfMonth)
-  startOfNextMonth.setMonth(startOfNextMonth.getMonth() + 1)
+  const startOfMonthDt = DateTime.fromObject(
+    { year, month, day: 1 },
+    { zone: GYM_TIMEZONE }
+  ).startOf("day")
+  const startOfMonth = startOfMonthDt.toJSDate()
+  const startOfNextMonth = startOfMonthDt.plus({ months: 1 }).toJSDate()
 
   try {
     // 2. FETCH DATA
@@ -93,8 +95,9 @@ export async function GET(request: Request) {
       }
       revenueByPlan[category as keyof typeof revenueByPlan] += amt
       
-      const istDate = new Date(p.createdAt.getTime() + istOffset)
-      const dateKey = istDate.toISOString().split('T')[0]
+      const dateKey = DateTime.fromJSDate(p.createdAt, { zone: "utc" })
+        .setZone(GYM_TIMEZONE)
+        .toFormat("yyyy-LL-dd")
       if (!dailyRevenueSummary[dateKey]) dailyRevenueSummary[dateKey] = { amount: 0, count: 0 }
       dailyRevenueSummary[dateKey].amount += amt
       dailyRevenueSummary[dateKey].count += 1
@@ -120,11 +123,11 @@ export async function GET(request: Request) {
     }
 
     sessions.forEach((a: any) => {
-      const istDate = new Date(a.checkIn.getTime() + istOffset)
-      const dateKey = istDate.toISOString().split('T')[0]
+      const checkInZ = DateTime.fromJSDate(a.checkIn, { zone: "utc" }).setZone(GYM_TIMEZONE)
+      const dateKey = checkInZ.toFormat("yyyy-LL-dd")
       if (!traffic.dailySummary[dateKey]) traffic.dailySummary[dateKey] = { count: 0, totalDuration: 0, durationCount: 0 }
       traffic.dailySummary[dateKey].count += 1
-      const istHour = istDate.getUTCHours()
+      const istHour = checkInZ.hour
       traffic.hourHeatmap[istHour] = (traffic.hourHeatmap[istHour] || 0) + 1
       if (a.checkIn && a.checkOut) {
         const duration = Math.round((a.checkOut.getTime() - a.checkIn.getTime()) / (1000 * 60))
@@ -139,7 +142,7 @@ export async function GET(request: Request) {
 
     const peakHourEntry = Object.entries(traffic.hourHeatmap).sort(([, a]: [string, number], [, b]: [string, number]) => b - a)[0]
     const peakHour = peakHourEntry ? parseInt(peakHourEntry[0]) : 0
-    const reportLabel = startOfMonth.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })
+    const reportLabel = startOfMonthDt.toFormat("LLLL yyyy")
 
     return NextResponse.json({
       period: { year, month, label: reportLabel },

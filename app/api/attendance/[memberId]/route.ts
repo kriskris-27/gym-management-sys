@@ -21,7 +21,7 @@ export async function GET(
     // Validate memberId
     if (!memberId || memberId.trim() === "") {
       return NextResponse.json(
-        { error: "Member ID required" },
+        { error: "Member ID required", code: "VALIDATION" },
         { status: 400 }
       )
     }
@@ -41,7 +41,10 @@ export async function GET(
     })
 
     if (!member || member.status === "DELETED") {
-      return NextResponse.json({ error: "Member not found" }, { status: 404 })
+      return NextResponse.json(
+        { error: "Member not found", code: "MEMBER_NOT_FOUND" },
+        { status: 404 }
+      )
     }
 
     // 2. Head Count (Total Records for Pagination)
@@ -93,6 +96,9 @@ export async function GET(
 
   } catch (error) {
     console.error("❌ Member History Error:", error)
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+    return NextResponse.json(
+      { error: "Could not load attendance history", code: "ATTENDANCE_HISTORY_FAILED" },
+      { status: 500 }
+    )
   }
 }
