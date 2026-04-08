@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { getISTDateRange } from "@/lib/utils"
+import { computeGlobalMemberLedger } from "@/domain/payment"
+import { DateTime } from "luxon"
 
 /**
  * POST: Daily Automation Job (Expiry Reminders & Inactivity Nudges)
@@ -22,84 +24,54 @@ export async function POST(request: Request) {
 
   const now = new Date()
   const { startOfTodayIST } = getISTDateRange()
+  const startOfToday = DateTime.isDateTime(startOfTodayIST)
+    ? startOfTodayIST.toJSDate()
+    : new Date(startOfTodayIST)
 
   // Track outcomes for the final report
   const stats = {
     expiry5Day: { sent: 0, skipped: 0, failed: 0 },
     expiry1Day: { sent: 0, skipped: 0, failed: 0 },
     inactivity: { sent: 0, skipped: 0, failed: 0 },
-    statusUpdates: { deactivated: 0, reactivated: 0 }
+    withPendingDue: { tagged: 0 },
   }
 
   try {
-    // JOB C: AUTO STATUS UPDATE (RUNS FIRST)
-    // This must execute before expiry notifications to prevent notifying newly deactivated members
-
-    // STEP 1: Auto set INACTIVE for expired members
-    const expiredMembers = await prisma.member.findMany({
-      where: {
-        status: "ACTIVE",
-        endDate: { lt: now }
-      },
-      select: { id: true, name: true }
-    })
-
-    if (expiredMembers.length > 0) {
-      await prisma.member.updateMany({
-        where: {
-          id: { in: expiredMembers.map((m: any) => m.id) }
-        },
-        data: { status: "INACTIVE" }
-      })
-      stats.statusUpdates.deactivated = expiredMembers.length
-      console.log(`✅ Auto-deactivated ${expiredMembers.length} expired members`)
-    }
-
-    // STEP 2: Auto set ACTIVE for renewed members
-    // (members marked INACTIVE but endDate is now in future)
-    // This handles case where owner manually extended dates
-    const renewedMembers = await prisma.member.findMany({
-      where: {
-        status: "INACTIVE",
-        endDate: { gt: now }
-      },
-      select: { id: true, name: true }
-    })
-
-    if (renewedMembers.length > 0) {
-      await prisma.member.updateMany({
-        where: {
-          id: { in: renewedMembers.map((m: any) => m.id) }
-        },
-        data: { status: "ACTIVE" }
-      })
-      stats.statusUpdates.reactivated = renewedMembers.length
-      console.log(`✅ Auto-reactivated ${renewedMembers.length} renewed members`)
-    }
-
     // PREPARE TIME WINDOWS (IST BOUNDED)
     // Expiry targets are checked against IST day starts
-    const fiveDayTargetStart = new Date(startOfTodayIST.getTime() + 5 * 24 * 60 * 60 * 1000)
+    const fiveDayTargetStart = new Date(startOfToday.getTime() + 5 * 24 * 60 * 60 * 1000)
     const fiveDayTargetEnd = new Date(fiveDayTargetStart.getTime() + 24 * 60 * 60 * 1000)
     
-    const oneDayTargetStart = new Date(startOfTodayIST.getTime() + 1 * 24 * 60 * 60 * 1000)
+    const oneDayTargetStart = new Date(startOfToday.getTime() + 1 * 24 * 60 * 60 * 1000)
     const oneDayTargetEnd = new Date(oneDayTargetStart.getTime() + 24 * 60 * 60 * 1000)
 
     // JOB A: EXPIRY NOTIFICATIONS (5-DAY & 1-DAY)
     // Process 5-Day window
-    const candidates5D = await prisma.member.findMany({
-      where: { endDate: { gte: fiveDayTargetStart, lt: fiveDayTargetEnd }, status: 'ACTIVE' },
-      select: { id: true, phone: true, name: true, endDate: true }
+    const candidates5D = await prisma.subscription.findMany({
+      where: {
+        status: "ACTIVE",
+        endDate: { gte: fiveDayTargetStart, lt: fiveDayTargetEnd },
+        member: { status: "ACTIVE" },
+      },
+      select: {
+        endDate: true,
+        member: { select: { id: true, phone: true, name: true } },
+      },
     })
 
-    for (const m of candidates5D) {
+    for (const c of candidates5D) {
       try {
+        const m = c.member
         const alreadySent = await prisma.notificationLog.findFirst({
-          where: { memberId: m.id, type: 'EXPIRY_5_DAY', sentAt: { gte: startOfTodayIST } }
+          where: { memberId: m.id, type: 'EXPIRY_5_DAY', sentAt: { gte: startOfToday } }
         })
         if (alreadySent) { stats.expiry5Day.skipped++; continue; }
 
-        const ok = await sendWhatsAppStub(m.phone, 'EXPIRY_5_DAY', m.name, { expiryDate: m.endDate.toISOString().split('T')[0] })
+        const ledger = await computeGlobalMemberLedger(m.id)
+        const dueAmount = Math.max(0, Math.round(ledger.remaining))
+        if (dueAmount > 1) stats.withPendingDue.tagged++
+
+        const ok = await sendWhatsAppStub(m.phone, 'EXPIRY_5_DAY', m.name, { expiryDate: c.endDate.toISOString().split('T')[0], dueAmount })
         await prisma.notificationLog.create({ 
           data: { memberId: m.id, type: 'EXPIRY_5_DAY', status: ok ? 'sent' : 'failed' } 
         })
@@ -108,19 +80,31 @@ export async function POST(request: Request) {
     }
 
     // Process 1-Day window
-    const candidates1D = await prisma.member.findMany({
-      where: { endDate: { gte: oneDayTargetStart, lt: oneDayTargetEnd }, status: 'ACTIVE' },
-      select: { id: true, phone: true, name: true, endDate: true }
+    const candidates1D = await prisma.subscription.findMany({
+      where: {
+        status: "ACTIVE",
+        endDate: { gte: oneDayTargetStart, lt: oneDayTargetEnd },
+        member: { status: "ACTIVE" },
+      },
+      select: {
+        endDate: true,
+        member: { select: { id: true, phone: true, name: true } },
+      },
     })
 
-    for (const m of candidates1D) {
+    for (const c of candidates1D) {
       try {
+        const m = c.member
         const alreadySent = await prisma.notificationLog.findFirst({
-          where: { memberId: m.id, type: 'EXPIRY_1_DAY', sentAt: { gte: startOfTodayIST } }
+          where: { memberId: m.id, type: 'EXPIRY_1_DAY', sentAt: { gte: startOfToday } }
         })
         if (alreadySent) { stats.expiry1Day.skipped++; continue; }
 
-        const ok = await sendWhatsAppStub(m.phone, 'EXPIRY_1_DAY', m.name, { expiryDate: m.endDate.toISOString().split('T')[0] })
+        const ledger = await computeGlobalMemberLedger(m.id)
+        const dueAmount = Math.max(0, Math.round(ledger.remaining))
+        if (dueAmount > 1) stats.withPendingDue.tagged++
+
+        const ok = await sendWhatsAppStub(m.phone, 'EXPIRY_1_DAY', m.name, { expiryDate: c.endDate.toISOString().split('T')[0], dueAmount })
         await prisma.notificationLog.create({ 
           data: { memberId: m.id, type: 'EXPIRY_1_DAY', status: ok ? 'sent' : 'failed' } 
         })
@@ -130,23 +114,29 @@ export async function POST(request: Request) {
 
 
     // JOB B: INACTIVITY NOTIFICATIONS (4-DAY PERSISTENCE)
-    const inactivityThreshold = new Date(startOfTodayIST.getTime() - 4 * 24 * 60 * 60 * 1000)
+    const inactivityThreshold = new Date(startOfToday.getTime() - 4 * 24 * 60 * 60 * 1000)
 
     const inactiveMembers = await prisma.member.findMany({
       where: { 
         status: 'ACTIVE',
-        endDate: { gte: now }, // Protect expired members from inactivity nudges
+        subscriptions: {
+          some: {
+            status: "ACTIVE",
+            startDate: { lte: now },
+            endDate: { gte: now },
+          },
+        },
         OR: [
           {
             // Case 1: Has attendance, but none in the last 4 days
-            attendance: {
+            sessions: {
               some: {},
-              none: { checkedInAt: { gte: inactivityThreshold } }
+              none: { checkIn: { gte: inactivityThreshold } }
             }
           },
           {
             // Case 2: No attendance records, and account created > 4 days ago
-            attendance: { none: {} },
+            sessions: { none: {} },
             createdAt: { lt: inactivityThreshold }
           }
         ]
@@ -156,8 +146,8 @@ export async function POST(request: Request) {
         phone: true, 
         name: true, 
         createdAt: true,
-        attendance: {
-          orderBy: { checkedInAt: 'desc' },
+        sessions: {
+          orderBy: { checkIn: 'desc' },
           take: 1
         }
       }
@@ -165,7 +155,7 @@ export async function POST(request: Request) {
 
     for (const m of inactiveMembers) {
       try {
-        const lastVisit = m.attendance[0]?.checkedInAt || m.createdAt
+        const lastVisit = m.sessions[0]?.checkIn || m.createdAt
 
         // Only nudge if they haven't been nudged since their last visit/creation
         const alreadyNudgedInThisStreak = await prisma.notificationLog.findFirst({
@@ -181,7 +171,11 @@ export async function POST(request: Request) {
           continue 
         }
 
-        const ok = await sendWhatsAppStub(m.phone, 'INACTIVITY', m.name)
+        const ledger = await computeGlobalMemberLedger(m.id)
+        const dueAmount = Math.max(0, Math.round(ledger.remaining))
+        if (dueAmount > 1) stats.withPendingDue.tagged++
+
+        const ok = await sendWhatsAppStub(m.phone, 'INACTIVITY', m.name, { dueAmount })
         await prisma.notificationLog.create({ 
           data: { memberId: m.id, type: 'INACTIVITY', status: ok ? 'sent' : 'failed' } 
         })
@@ -192,10 +186,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ 
       success: true, 
       processed: stats,
-      statusUpdates: { 
-        deactivated: stats.statusUpdates.deactivated,
-        reactivated: stats.statusUpdates.reactivated
-      }
     })
 
   } catch (error) {
@@ -212,12 +202,15 @@ async function sendWhatsAppStub(
   phone: string, 
   type: "EXPIRY_5_DAY" | "EXPIRY_1_DAY" | "INACTIVITY", 
   memberName: string, 
-  meta?: { expiryDate?: string }
+  meta?: { expiryDate?: string; dueAmount?: number }
 ): Promise<boolean> {
+  const dueSuffix = (meta?.dueAmount ?? 0) > 1
+    ? ` Pending due: ₹${Math.round(meta?.dueAmount || 0)}. Please clear it.`
+    : ""
   const messages = {
-    EXPIRY_5_DAY: `Hi ${memberName}, your gym membership expires in 5 days on ${meta?.expiryDate}. Please renew to continue. Contact us: ROYAL FITNESS`,
-    EXPIRY_1_DAY: `Hi ${memberName}, your membership expires TOMORROW on ${meta?.expiryDate}. Renew today! Contact us: ROYAL FITNESS`,
-    INACTIVITY: `Hi ${memberName}, we miss you at the gym! It has been 4 days since your last visit. Come back today! ROYAL FITNESS`
+    EXPIRY_5_DAY: `Hi ${memberName}, your gym membership expires in 5 days on ${meta?.expiryDate}. Please renew to continue.${dueSuffix} Contact us: ROYAL FITNESS`,
+    EXPIRY_1_DAY: `Hi ${memberName}, your membership expires TOMORROW on ${meta?.expiryDate}. Renew today!${dueSuffix} Contact us: ROYAL FITNESS`,
+    INACTIVITY: `Hi ${memberName}, we miss you at the gym! It has been 4 days since your last visit. Come back today!${dueSuffix} ROYAL FITNESS`
   }
   
   const msg = messages[type]

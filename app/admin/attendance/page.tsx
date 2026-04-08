@@ -7,6 +7,7 @@ import { useAttendanceToday } from "@/hooks/useAttendance";
 import { useAttendanceScan } from "@/hooks/useAttendanceScan";
 import { formatDuration } from "@/lib/utils";
 import { formatGymDateLong, formatGymTime, gymNow } from "@/lib/gym-datetime";
+import SpeedLoader from "@/app/components/SpeedLoader";
 
 interface PaymentSummary {
   dueAmount: number;
@@ -135,6 +136,15 @@ export default function AttendancePage() {
     (r) => !r.checkedOutAt && !r.autoClosed,
   ).length;
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+        <SpeedLoader />
+        <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading attendance</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30">
       <style>{`
@@ -165,55 +175,82 @@ export default function AttendancePage() {
       {/* STAT CARDS */}
       <div className="grid grid-cols-3 gap-4 mt-6 animate-page">
         {/* Total Present */}
-        <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5">
-          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">
-            Total Present
-          </p>
-          {loading ? (
-            <div className="bg-[#1C1C1C] h-10 w-20 rounded animate-pulse mb-2" />
-          ) : (
-            <p className="text-white text-[36px] font-black leading-none">
-              {data?.totalPresent ?? 0}
-            </p>
-          )}
-          <p className="text-[#333333] text-[11px] mt-2">members today</p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">
+                Total Present
+              </p>
+              {loading ? (
+                <div className="bg-[#1C1C1C] h-10 w-20 rounded animate-pulse mb-2" />
+              ) : (
+                <p className="text-white text-[36px] font-black leading-none">
+                  {data?.totalPresent ?? 0}
+                </p>
+              )}
+              <p className="text-[#c9c9c9] text-[11px] mt-2">members today</p>
+            </div>
+          </div>
         </div>
 
         {/* Inside Now */}
-        <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5">
-          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3 flex items-center gap-2">
-            Inside Now
-            {!loading && currentlyInside > 0 && (
-              <span className="w-1.5 h-1.5 rounded-full bg-[#D11F00] dot-pulse inline-block" />
-            )}
-          </p>
-          {loading ? (
-            <div className="bg-[#1C1C1C] h-10 w-20 rounded animate-pulse mb-2" />
-          ) : (
-            <p
-              className={`text-[36px] font-black leading-none ${
-                currentlyInside > 0 ? "text-[#D11F00]" : "text-white"
-              }`}
-            >
-              {currentlyInside}
-            </p>
-          )}
-          <p className="text-[#333333] text-[11px] mt-2">currently training</p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3 flex items-center gap-2">
+                Inside Now
+                {!loading && currentlyInside > 0 && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#D11F00] dot-pulse inline-block" />
+                )}
+              </p>
+              {loading ? (
+                <div className="bg-[#1C1C1C] h-10 w-20 rounded animate-pulse mb-2" />
+              ) : (
+                <p
+                  className={`text-[36px] font-black leading-none ${
+                    currentlyInside > 0 ? "text-[#D11F00]" : "text-white"
+                  }`}
+                >
+                  {currentlyInside}
+                </p>
+              )}
+              <p className="text-[#c9c9c9] text-[11px] mt-2">currently training</p>
+            </div>
+          </div>
         </div>
 
         {/* Avg Duration */}
-        <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5">
-          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">
-            Avg Duration
-          </p>
-          {loading ? (
-            <div className="bg-[#1C1C1C] h-10 w-24 rounded animate-pulse mb-2" />
-          ) : (
-            <p className="text-white text-[36px] font-black leading-none">
-              {avgDuration !== null ? formatDuration(avgDuration) : "—"}
-            </p>
-          )}
-          <p className="text-[#333333] text-[11px] mt-2">per session today</p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">
+                Avg Duration
+              </p>
+              {loading ? (
+                <div className="bg-[#1C1C1C] h-10 w-24 rounded animate-pulse mb-2" />
+              ) : (
+                <p className="text-white text-[36px] font-black leading-none">
+                  {avgDuration !== null ? formatDuration(avgDuration) : "—"}
+                </p>
+              )}
+              <p className="text-[#c9c9c9] text-[11px] mt-2">per session today</p>
+            </div>
+          </div>
         </div>
       </div>
 

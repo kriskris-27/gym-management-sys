@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useMonthlyReport } from "@/hooks/useReports"
 import { DateTime } from "luxon"
 import { GYM_TIMEZONE, gymNow } from "@/lib/gym-datetime"
+import SpeedLoader from "@/app/components/SpeedLoader"
 
 function currentISTYear() {
   return gymNow().year
@@ -81,7 +82,11 @@ const MONTHS = [
   "Dec",
 ]
 
-const YEARS = [2024, 2025, 2026]
+function getAvailableYears() {
+  const currentYear = currentISTYear()
+  const startYear = 2020
+  return Array.from({ length: currentYear - startYear + 1 }, (_, i) => startYear + i)
+}
 
 const PLAN_ORDER = [
   "MONTHLY",
@@ -113,6 +118,8 @@ type MonthlyReport = {
     expectedTotal: number
     gap: number
     discountTotal: number
+    collectedForCurrentMonthSales: number
+    carryOverCollected: number
     pendingAfterDiscount: number
     byPlan: Record<string, number>
     byMode: { CASH: number; UPI: number; CARD: number }
@@ -313,6 +320,7 @@ export default function AdminReportsPage() {
     avgMins === 0 ? "—" : `${hrs}hr ${mins}min`
 
   const chartKey = `${year}-${month}`
+  const years = useMemo(() => getAvailableYears(), [])
 
   if (isError && !isLoading) {
     return (
@@ -326,29 +334,9 @@ export default function AdminReportsPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen w-full animate-[pageFade_0.4s_ease-out] bg-[#080808] p-8">
-        <style>{`
-          @keyframes pageFade {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
-        `}</style>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-28 animate-pulse rounded-xl bg-[#1C1C1C]"
-            />
-          ))}
-        </div>
-        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="h-[280px] animate-pulse rounded-xl bg-[#1C1C1C]" />
-          <div className="h-[280px] animate-pulse rounded-xl bg-[#1C1C1C]" />
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="h-[280px] animate-pulse rounded-xl bg-[#1C1C1C]" />
-          <div className="h-[280px] animate-pulse rounded-xl bg-[#1C1C1C]" />
-        </div>
+      <div className="min-h-screen w-full bg-[#080808] p-8 flex flex-col items-center justify-center gap-3">
+        <SpeedLoader />
+        <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading reports</p>
       </div>
     )
   }
@@ -393,7 +381,7 @@ export default function AdminReportsPage() {
               onChange={(e) => setYear(Number(e.target.value))}
               className="rounded-lg border border-[#1C1C1C] bg-[#111111] px-3 py-2 text-[12px] text-white focus:border-[#D11F00] focus:outline-none"
             >
-              {YEARS.map((y) => (
+              {years.map((y) => (
                 <option key={y} value={y}>
                   {y}
                 </option>
@@ -403,80 +391,137 @@ export default function AdminReportsPage() {
           <button
             type="button"
             onClick={() => alert("PDF export coming soon")}
-            className="rounded-lg border border-[#242424] bg-transparent px-4 py-2 text-[12px] font-bold uppercase tracking-wider text-[#444444] hover:text-white"
+            className="themeFancyBtn px-4 py-2"
           >
-            Export PDF
+            <span>Export PDF</span>
           </button>
         </div>
       </div>
 
       {/* Stat cards */}
       <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-[#666666]">
-            CASH COLLECTED
-          </p>
-          <p className="mt-2 text-[32px] font-black text-white">
-            ₹{(data?.revenue.total ?? 0).toLocaleString("en-IN")}
-          </p>
-          <p className="mt-1 text-[12px] text-[#10B981] font-medium">
-            From {data?.revenue.dailyBreakdown.reduce((s, b) => s + b.count, 0)} transactions
-          </p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">CASH COLLECTED</p>
+              <p className="mt-2 text-[32px] font-black text-white">₹{(data?.revenue.total ?? 0).toLocaleString("en-IN")}</p>
+              <p className="mt-1 text-[12px] text-[#10B981] font-medium">From {data?.revenue.dailyBreakdown.reduce((s, b) => s + b.count, 0)} transactions</p>
+              {(data?.revenue.carryOverCollected ?? 0) > 0 && (
+                <p className="mt-1 text-[11px] text-[#F59E0B]">
+                  Includes ₹{(data?.revenue.carryOverCollected ?? 0).toLocaleString("en-IN")} from older plan dues
+                </p>
+              )}
+            </div>
+          </div>
         </div>
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-[#666666]">
-            TOTAL SALES
-          </p>
-          <p className="mt-2 text-[32px] font-black text-[#F59E0B]">
-            ₹{(data?.revenue.expectedTotal ?? 0).toLocaleString("en-IN")}
-          </p>
-          {(data?.revenue.pendingAfterDiscount ?? 0) > 0 ? (
-            <p className="mt-1 text-[12px] text-[#D11F00] font-medium">
-              Pending: ₹{(data?.revenue.pendingAfterDiscount ?? 0).toLocaleString("en-IN")}
-              {(data?.revenue.discountTotal ?? 0) > 0
-                ? ` (after ₹${(data?.revenue.discountTotal ?? 0).toLocaleString("en-IN")} discount)`
-                : ""}
-            </p>
-          ) : (data?.revenue.gap ?? 0) > 0 ? (
-            <p className="mt-1 text-[12px] text-[#10B981] font-medium">
-              No pending. ₹{(data?.revenue.gap ?? 0).toLocaleString("en-IN")} is discount-adjusted.
-            </p>
-          ) : (
-            <p className="mt-1 text-[12px] text-[#10B981] font-medium">
-              All sales collected ✓
-            </p>
-          )}
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">TOTAL SALES</p>
+              <p className="mt-2 text-[32px] font-black text-[#F59E0B]">
+                ₹{(data?.revenue.collectedForCurrentMonthSales ?? 0).toLocaleString("en-IN")}
+              </p>
+              <p className="mt-1 text-[11px] text-[#c9c9c9]">
+                Total sales: ₹{(data?.revenue.expectedTotal ?? 0).toLocaleString("en-IN")}
+              </p>
+              {(data?.revenue.pendingAfterDiscount ?? 0) > 0 ? (
+                <p className="mt-1 text-[12px] text-[#D11F00] font-medium">
+                  Pending: ₹{(data?.revenue.pendingAfterDiscount ?? 0).toLocaleString("en-IN")}
+                  {(data?.revenue.discountTotal ?? 0) > 0 ? ` (after ₹${(data?.revenue.discountTotal ?? 0).toLocaleString("en-IN")} discount)` : ""}
+                </p>
+              ) : (data?.revenue.gap ?? 0) > 0 ? (
+                <p className="mt-1 text-[12px] text-[#10B981] font-medium">No pending. ₹{(data?.revenue.gap ?? 0).toLocaleString("en-IN")} is discount-adjusted.</p>
+              ) : (
+                <p className="mt-1 text-[12px] text-[#10B981] font-medium">All sales collected ✓</p>
+              )}
+            </div>
+          </div>
         </div>
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-[#666666]">
-            NEW MEMBERS
-          </p>
-          <p className="mt-2 text-[32px] font-black text-white">
-            {data?.members.newThisMonth ?? 0}
-          </p>
-          <p className="mt-1 text-[12px] text-[#444444]">
-            {(data?.members.renewalsThisMonth ?? 0).toLocaleString("en-IN")} renewals
-          </p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">DISCOUNT GIVEN</p>
+              <p className="mt-2 text-[32px] font-black text-[#10B981]">₹{(data?.revenue.discountTotal ?? 0).toLocaleString("en-IN")}</p>
+              <p className="mt-1 text-[12px] text-[#c9c9c9]">for selected month sales</p>
+            </div>
+          </div>
         </div>
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-[#666666]">
-            TOTAL SESSIONS
-          </p>
-          <p className="mt-2 text-[32px] font-black text-white">
-            {data?.attendance.totalSessions ?? 0}
-          </p>
-          <p className="mt-1 text-[12px] text-[#444444]">
-            {data?.attendance.uniqueMembers ?? 0} unique members
-          </p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">CARRY-OVER COLLECTED</p>
+              <p className="mt-2 text-[32px] font-black text-[#A78BFA]">
+                ₹{(data?.revenue.carryOverCollected ?? 0).toLocaleString("en-IN")}
+              </p>
+              <p className="mt-1 text-[12px] text-[#c9c9c9]">paid this month for older plan dues</p>
+            </div>
+          </div>
         </div>
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-[#666666]">
-            AVG SESSION
-          </p>
-          <p className="mt-2 text-[32px] font-black text-white">
-            {avgSessionDisplay}
-          </p>
-          <p className="mt-1 text-[12px] text-[#444444]">per visit</p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">NEW MEMBERS</p>
+              <p className="mt-2 text-[32px] font-black text-white">{data?.members.newThisMonth ?? 0}</p>
+              <p className="mt-1 text-[12px] text-[#c9c9c9]">{(data?.members.renewalsThisMonth ?? 0).toLocaleString("en-IN")} renewals</p>
+            </div>
+          </div>
+        </div>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">TOTAL SESSIONS</p>
+              <p className="mt-2 text-[32px] font-black text-white">{data?.attendance.totalSessions ?? 0}</p>
+              <p className="mt-1 text-[12px] text-[#c9c9c9]">{data?.attendance.uniqueMembers ?? 0} unique members</p>
+            </div>
+          </div>
+        </div>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">
+                AVG SESSION
+              </p>
+              <p className="mt-2 text-[32px] font-black text-white">
+                {avgSessionDisplay}
+              </p>
+              <p className="mt-1 text-[12px] text-[#c9c9c9]">per visit</p>
+            </div>
+          </div>
         </div>
       </div>
 

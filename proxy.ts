@@ -11,6 +11,7 @@ const PUBLIC_ROUTES = [
   "/api/auth/login",
   "/api/attendance/scan",
   "/api/cron/notify",
+  "/api/cron/close-sessions",
 ]
 
 /**
@@ -74,6 +75,5 @@ export const config = {
     "/api/reports/:path*",
     "/api/settings/:path*",
     "/api/auth/logout",
-    "/api/cron/:path*",
   ],
 }

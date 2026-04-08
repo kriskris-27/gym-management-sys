@@ -9,6 +9,7 @@ import { z } from "zod"
 import { useMember } from "@/hooks/useMembers"
 import { usePayments, usePaymentSummary } from "@/hooks/usePayments"
 import { useMemberAttendance } from "@/hooks/useAttendance"
+import SpeedLoader from "@/app/components/SpeedLoader"
 import {
   formatMemberDate,
   formatMemberTime,
@@ -110,7 +111,6 @@ const memberSchema = z.object({
   membershipType: z.enum(["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL", "OTHERS"]),
   startDate: z.string().min(1),
   endDate: z.string().optional(),
-  status: z.enum(["ACTIVE", "INACTIVE", "DELETED"]),
   manualPlanName: z.string().optional(),
   manualAmount: z.number().optional(),
 })
@@ -351,7 +351,6 @@ export default function MemberProfilePage() {
         membershipType: member.membershipType,
         startDate: member.startDate ? (typeof member.startDate === 'string' ? member.startDate.split('T')[0] : member.startDate.toISOString().split('T')[0]) : getTodayStr(),
         endDate: member.endDate ? (typeof member.endDate === 'string' ? member.endDate.split('T')[0] : member.endDate.toISOString().split('T')[0]) : "",
-        status: member.status
       })
     }
   }, [member, showEditModal, resetEdit])
@@ -523,9 +522,9 @@ export default function MemberProfilePage() {
 
   if (loading) {
     return (
-      <div className="w-full min-h-screen bg-[#080808] p-8 text-white">
-         <div className="bg-[#1C1C1C] animate-pulse h-[200px] rounded-xl mb-6" />
-         <div className="bg-[#1C1C1C] animate-pulse h-[400px] rounded-xl" />
+      <div className="w-full min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+         <SpeedLoader />
+         <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading member profile</p>
       </div>
     )
   }
@@ -635,9 +634,9 @@ export default function MemberProfilePage() {
                 onClick={() => {
                   setShowRenewalModal(true)
                 }}
-                className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
+                className="themeFancyBtn cursor-pointer"
               >
-                Renew Plan
+                <span>Renew Plan</span>
               </button>
             )}
             {!shouldShowRenew && !isCancelledPlan && (
@@ -645,9 +644,9 @@ export default function MemberProfilePage() {
                 onClick={() => {
                   setShowRenewalModal(true)
                 }}
-                className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
+                className="themeFancyBtn cursor-pointer"
               >
-                Add Plan
+                <span>Add Plan</span>
               </button>
             )}
           </div>
@@ -939,9 +938,9 @@ export default function MemberProfilePage() {
             <h2 className="text-white font-bold text-[14px]">Payment History</h2>
             <button
               onClick={() => setShowPaymentModal(true)}
-              className="bg-[#D11F00] hover:bg-[#B51A00] text-white text-[11px] font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-colors cursor-pointer"
+              className="themeFancyBtn cursor-pointer"
             >
-              + Add Payment
+              <span>+ Add Payment</span>
             </button>
           </div>
 
@@ -960,7 +959,30 @@ export default function MemberProfilePage() {
                     acc[key].push(p)
                     return acc
                   }, {})
-              ).map(([key, items]) => {
+              )
+                .sort(([aKey, aItems], [bKey, bItems]) => {
+                  // Always keep unassigned bucket at the end.
+                  if (aKey === "UNASSIGNED") return 1
+                  if (bKey === "UNASSIGNED") return -1
+
+                  const aSub = aItems[0]?.subscription
+                  const bSub = bItems[0]?.subscription
+                  const aTs = aSub?.startDate ? new Date(aSub.startDate).getTime() : 0
+                  const bTs = bSub?.startDate ? new Date(bSub.startDate).getTime() : 0
+                  // Most recent plan first.
+                  if (bTs !== aTs) return bTs - aTs
+
+                  // Tie-breaker 1: later plan end date first (helps current/longer active plan bubble up).
+                  const aEndTs = aSub?.endDate ? new Date(aSub.endDate).getTime() : 0
+                  const bEndTs = bSub?.endDate ? new Date(bSub.endDate).getTime() : 0
+                  if (bEndTs !== aEndTs) return bEndTs - aEndTs
+
+                  // Tie-breaker 2: latest payment date in group first.
+                  const aLatestPayTs = Math.max(...aItems.map((p) => new Date(p.date).getTime()))
+                  const bLatestPayTs = Math.max(...bItems.map((p) => new Date(p.date).getTime()))
+                  return bLatestPayTs - aLatestPayTs
+                })
+                .map(([key, items]) => {
                 const sub = items[0]?.subscription ?? null
                 const total = items.reduce((s, p) => s + (p.amount || 0), 0)
                 const totalDiscount = items.reduce((s, p) => s + (p.discountAmount || 0), 0)
@@ -1224,23 +1246,20 @@ export default function MemberProfilePage() {
                     Math.round(Number(watchPayment("amount") || 0)) >
                       Math.max(0, Math.round(Number(paymentSummary?.remaining ?? 0)))
                   }
-                  className={`flex-[2] text-white font-bold text-[12px] tracking-[0.1em] uppercase py-3 rounded-lg transition-all duration-200 flex items-center justify-center gap-2
-                    ${paymentSuccess ? "bg-[#10B981]" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
-                    ${(isPaying && !paymentSuccess) ? "opacity-70 cursor-not-allowed" : ""}
-                  `}
+                  className={`themeFancyBtn flex-[2] py-3 flex items-center justify-center gap-2 ${paymentSuccess ? "themeFancyBtn--success" : isPaying ? "themeFancyBtn--loading" : paymentError ? "themeFancyBtn--error" : ""} ${(isPaying && !paymentSuccess) ? "cursor-not-allowed" : "cursor-pointer"}`}
                 >
-                  {isPaying ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                      Processing...
-                    </>
-                  ) : paymentSuccess ? (
+                  {paymentSuccess ? (
                     <>
                       <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                       </svg>
                       Recorded ✓
                     </>
+                  ) : isPaying ? (
+                    <span className="flex items-center">
+                      <span className="themeBtnMiniLoader"><span /><span /><span /></span>
+                      <span>Processing...</span>
+                    </span>
                   ) : (
                     "Save Payment"
                   )}
@@ -1413,12 +1432,16 @@ export default function MemberProfilePage() {
                 <button
                   type="submit"
                   disabled={isRenewing || renewalSuccess}
-                  className={`w-2/3 text-white font-bold text-[12px] tracking-[0.1em] uppercase py-3 rounded-lg transition-all duration-200 flex items-center justify-center
-                    ${renewalSuccess ? "bg-[#10B981]" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
-                    ${(isRenewing && !renewalSuccess) ? "opacity-70 cursor-not-allowed" : ""}
-                  `}
+                  className={`themeFancyBtn w-2/3 py-3 flex items-center justify-center ${renewalSuccess ? "themeFancyBtn--success" : isRenewing ? "themeFancyBtn--loading" : renewError ? "themeFancyBtn--error" : ""} ${(isRenewing && !renewalSuccess) ? "cursor-not-allowed" : "cursor-pointer"}`}
                 >
-                  {renewalSuccess ? "Renewed ✓" : "Renew"}
+                  <span>
+                    {renewalSuccess ? "Renewed ✓" : isRenewing ? (
+                      <span className="flex items-center">
+                        <span className="themeBtnMiniLoader"><span /><span /><span /></span>
+                        <span>Renewing...</span>
+                      </span>
+                    ) : "Renew"}
+                  </span>
                 </button>
               </div>
             </form>
@@ -1455,16 +1478,12 @@ export default function MemberProfilePage() {
                 />
               </div>
 
-              <div>
-                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Status</label>
-                <select
-                  {...regEdit("status")}
-                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 cursor-pointer appearance-none"
-                >
-                  <option value="ACTIVE">Active</option>
-                  <option value="INACTIVE">Inactive</option>
-                  <option value="DELETED">Deleted (hide from lists)</option>
-                </select>
+              <div className="rounded-lg border border-[#1F1F1F] bg-[#0F0F0F] px-4 py-3">
+                <p className="text-[#999999] text-[11px] font-semibold uppercase tracking-[0.12em]">Status</p>
+                <p className="mt-1 text-[13px] text-white">{member.status}</p>
+                <p className="mt-1 text-[11px] text-[#666666]">
+                  Status is controlled by subscriptions. Use Delete/Restore actions when needed.
+                </p>
               </div>
 
               <div>

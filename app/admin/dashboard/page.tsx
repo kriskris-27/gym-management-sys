@@ -9,6 +9,7 @@ import {
   parseGymDateOnly,
   GYM_TIMEZONE,
 } from "@/lib/gym-datetime"
+import SpeedLoader from "@/app/components/SpeedLoader"
 
 interface Member {
   id: string
@@ -104,66 +105,95 @@ export default function DashboardPage() {
 
       {loading ? (
         // LOADING SKELETONS
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map(i => (
-              <div key={i} className="bg-[#1C1C1C] h-[120px] rounded-xl animate-pulse" />
-            ))}
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-            <div className="bg-[#1C1C1C] h-[400px] rounded-xl animate-pulse" />
-            <div className="bg-[#1C1C1C] h-[400px] rounded-xl animate-pulse" />
-          </div>
+        <div className="mt-8 flex flex-col items-center justify-center gap-3">
+          <SpeedLoader />
+          <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading dashboard</p>
         </div>
       ) : data ? (
         <>
           {/* STAT CARDS ROW */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             {/* Card 1 */}
-            <div className="bg-[#111111] border border-[#1C1C1C] hover:border-[#2A2A2A] transition-colors duration-200 rounded-xl p-5 animate-fadeUp [animation-delay:0.1s] opacity-0">
-              <div className="flex items-center gap-2 mb-3">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D11F00" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                <h3 className="text-[#444444] text-[10px] tracking-widest uppercase font-bold">Present Today</h3>
+            <div className="themeFxCardOuter animate-fadeUp [animation-delay:0.1s] opacity-0">
+              <div className="themeFxCard">
+                <div className="themeFxCardRay" />
+                <div className="themeFxCardLine themeFxCardLineTop" />
+                <div className="themeFxCardLine themeFxCardLineBottom" />
+                <div className="themeFxCardLine themeFxCardLineLeft" />
+                <div className="themeFxCardLine themeFxCardLineRight" />
+                <div className="relative z-10">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D11F00" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <h3 className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold">Present Today</h3>
+                  </div>
+                  <div className="text-white text-[40px] font-black leading-none mb-1">{data.today.totalPresent}</div>
+                  <p className="text-[#c9c9c9] text-[11px] font-medium uppercase tracking-wider">members checked in</p>
+                </div>
               </div>
-              <div className="text-white text-[40px] font-black leading-none mb-1">{data.today.totalPresent}</div>
-              <p className="text-[#333333] text-[11px] font-medium uppercase tracking-wider">members checked in</p>
             </div>
 
             {/* Card 2 */}
-            <div className="bg-[#111111] border border-[#1C1C1C] hover:border-[#2A2A2A] transition-colors duration-200 rounded-xl p-5 animate-fadeUp [animation-delay:0.2s] opacity-0">
-              <div className="flex items-center gap-2 mb-3">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={data.today.currentlyInside > 0 ? "#D11F00" : "#555555"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                <h3 className="text-[#444444] text-[10px] tracking-widest uppercase font-bold">Inside Now</h3>
+            <div className="themeFxCardOuter animate-fadeUp [animation-delay:0.2s] opacity-0">
+              <div className="themeFxCard">
+                <div className="themeFxCardRay" />
+                <div className="themeFxCardLine themeFxCardLineTop" />
+                <div className="themeFxCardLine themeFxCardLineBottom" />
+                <div className="themeFxCardLine themeFxCardLineLeft" />
+                <div className="themeFxCardLine themeFxCardLineRight" />
+                <div className="relative z-10">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={data.today.currentlyInside > 0 ? "#D11F00" : "#555555"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <h3 className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold">Inside Now</h3>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-white text-[40px] font-black leading-none mb-1">{data.today.currentlyInside}</div>
+                    {data.today.currentlyInside > 0 && (
+                      <div className="w-1.5 h-1.5 bg-[#D11F00] rounded-full dot-pulse -mt-2" />
+                    )}
+                  </div>
+                  <p className="text-[#c9c9c9] text-[11px] font-medium uppercase tracking-wider">currently training</p>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-white text-[40px] font-black leading-none mb-1">{data.today.currentlyInside}</div>
-                {data.today.currentlyInside > 0 && (
-                  <div className="w-1.5 h-1.5 bg-[#D11F00] rounded-full dot-pulse -mt-2" />
-                )}
-              </div>
-              <p className="text-[#333333] text-[11px] font-medium uppercase tracking-wider">currently training</p>
             </div>
 
             {/* Card 3 */}
-            <div className="bg-[#111111] border border-[#1C1C1C] hover:border-[#2A2A2A] transition-colors duration-200 rounded-xl p-5 animate-fadeUp [animation-delay:0.3s] opacity-0">
-              <div className="flex items-center gap-2 mb-3">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                <h3 className="text-[#444444] text-[10px] tracking-widest uppercase font-bold">Active Members</h3>
+            <div className="themeFxCardOuter animate-fadeUp [animation-delay:0.3s] opacity-0">
+              <div className="themeFxCard">
+                <div className="themeFxCardRay" />
+                <div className="themeFxCardLine themeFxCardLineTop" />
+                <div className="themeFxCardLine themeFxCardLineBottom" />
+                <div className="themeFxCardLine themeFxCardLineLeft" />
+                <div className="themeFxCardLine themeFxCardLineRight" />
+                <div className="relative z-10">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <h3 className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold">Active Members</h3>
+                  </div>
+                  <div className="text-white text-[40px] font-black leading-none mb-1">{data.members.active}</div>
+                  <p className="text-[#c9c9c9] text-[11px] font-medium uppercase tracking-wider">{data.members.total} total registered</p>
+                </div>
               </div>
-              <div className="text-white text-[40px] font-black leading-none mb-1">{data.members.active}</div>
-              <p className="text-[#333333] text-[11px] font-medium uppercase tracking-wider">{data.members.total} total registered</p>
             </div>
 
             {/* Card 4 */}
-            <div className="bg-[#111111] border border-[#1C1C1C] hover:border-[#2A2A2A] transition-colors duration-200 rounded-xl p-5 animate-fadeUp [animation-delay:0.4s] opacity-0">
-              <div className="flex items-center gap-2 mb-3">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                <h3 className="text-[#444444] text-[10px] tracking-widest uppercase font-bold">This Month</h3>
+            <div className="themeFxCardOuter animate-fadeUp [animation-delay:0.4s] opacity-0">
+              <div className="themeFxCard">
+                <div className="themeFxCardRay" />
+                <div className="themeFxCardLine themeFxCardLineTop" />
+                <div className="themeFxCardLine themeFxCardLineBottom" />
+                <div className="themeFxCardLine themeFxCardLineLeft" />
+                <div className="themeFxCardLine themeFxCardLineRight" />
+                <div className="relative z-10">
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    <h3 className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold">This Month</h3>
+                  </div>
+                  <div className="text-white text-[40px] font-black leading-none mb-1">
+                    ₹{data.payments.thisMonth.toLocaleString('en-IN')}
+                  </div>
+                  <p className="text-[#c9c9c9] text-[11px] font-medium uppercase tracking-wider">{data.payments.thisMonthCount} transactions</p>
+                </div>
               </div>
-              <div className="text-white text-[40px] font-black leading-none mb-1">
-                ₹{data.payments.thisMonth.toLocaleString('en-IN')}
-              </div>
-              <p className="text-[#333333] text-[11px] font-medium uppercase tracking-wider">{data.payments.thisMonthCount} transactions</p>
             </div>
           </div>
 

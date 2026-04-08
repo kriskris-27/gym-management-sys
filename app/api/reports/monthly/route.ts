@@ -58,7 +58,7 @@ export async function GET(request: Request) {
         where: { createdAt: { gte: startOfMonth, lt: startOfNextMonth }, status: "SUCCESS" },
         include: { 
           member: { select: { createdAt: true } },
-          subscription: { select: { planNameSnapshot: true } }
+          subscription: { select: { planNameSnapshot: true, startDate: true } }
         }
       }),
       prisma.attendanceSession.findMany({
@@ -105,9 +105,28 @@ export async function GET(request: Request) {
 
     // Sales Revenue (Accrual) Logic
     const expectedRevenueTotal = monthlySubscriptions.reduce((sum, s) => sum + (s.planPriceSnapshot || 0), 0)
-    const totalDiscountGiven = payments.reduce((sum, p: any) => sum + (p.discountAmount || 0), 0)
-    const gapBeforeDiscount = Math.max(0, expectedRevenueTotal - revenueCollected)
-    const pendingAfterDiscount = Math.max(0, expectedRevenueTotal - (revenueCollected + totalDiscountGiven))
+    const collectedForCurrentMonthSales = payments.reduce((sum, p: any) => {
+      const soldThisMonth =
+        !!p.subscription &&
+        p.subscription.startDate >= startOfMonth &&
+        p.subscription.startDate < startOfNextMonth
+      if (!soldThisMonth) return sum
+      return sum + (p.finalAmount || 0)
+    }, 0)
+    const discountTotal = payments.reduce((sum, p: any) => {
+      const soldThisMonth =
+        !!p.subscription &&
+        p.subscription.startDate >= startOfMonth &&
+        p.subscription.startDate < startOfNextMonth
+      if (!soldThisMonth) return sum
+      return sum + (p.discountAmount || 0)
+    }, 0)
+    const carryOverCollected = Math.max(0, revenueCollected - collectedForCurrentMonthSales)
+    const gapBeforeDiscount = Math.max(0, expectedRevenueTotal - collectedForCurrentMonthSales)
+    const pendingAfterDiscount = Math.max(
+      0,
+      expectedRevenueTotal - (collectedForCurrentMonthSales + discountTotal)
+    )
 
     // Improved Renewal Logic: Unique members who paid this month and existed before
     const membersWhoPaid = new Set(payments.filter(p => p.finalAmount > 0).map(p => p.memberId))
@@ -153,7 +172,9 @@ export async function GET(request: Request) {
         total: revenueCollected,
         expectedTotal: expectedRevenueTotal, // Total plan value sold this month
         gap: gapBeforeDiscount, // Gross gap before discount adjustment
-        discountTotal: totalDiscountGiven,
+        discountTotal,
+        collectedForCurrentMonthSales,
+        carryOverCollected,
         pendingAfterDiscount, // Actual pending after discount adjustment
         byPlan: revenueByPlan,
         byMode: revenueByMode,

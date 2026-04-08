@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { usePayments } from "@/hooks/usePayments"
 import { firstDayOfMonthYmdInGym, todayYmdInIST } from "@/lib/gym-datetime"
 import type { MemberFinancials } from "@/lib/financial-service"
+import SpeedLoader from "@/app/components/SpeedLoader"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,15 @@ export default function PaymentsPage() {
   const cashTotal = filtered.filter((p) => p.mode === "CASH").reduce((s, p) => s + p.amount, 0)
   const upiTotal = filtered.filter((p) => p.mode === "UPI").reduce((s, p) => s + p.amount, 0)
   const cardTotal = filtered.filter((p) => p.mode === "CARD").reduce((s, p) => s + p.amount, 0)
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+        <SpeedLoader />
+        <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading payments</p>
+      </div>
+    )
+  }
 
   // ─── Member search in modal ───────────────────────────────────────────────
 
@@ -254,63 +264,90 @@ export default function PaymentsPage() {
         </div>
         <button
           onClick={openModal}
-          className="bg-[#D11F00] hover:bg-[#B51A00] text-white font-bold text-[12px] uppercase tracking-[0.1em] px-5 py-2.5 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
+          className="themeFancyBtn px-5 py-2.5 cursor-pointer"
         >
-          + Record Payment
+          <span>+ Record Payment</span>
         </button>
       </div>
 
       {/* ── STAT CARDS ── */}
       <div className="grid grid-cols-3 gap-4 mt-6 animate-page">
         {/* Selected Range */}
-        <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5">
-          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">Selected Range</p>
-          {loading ? (
-            <div className="bg-[#1C1C1C] h-9 w-28 rounded animate-pulse mb-2" />
-          ) : (
-            <p className="text-white text-[32px] font-black leading-none">
-              ₹{rangeTotal.toLocaleString("en-IN")}
-            </p>
-          )}
-          <p className="text-[#333333] text-[11px] mt-2">{loading ? "—" : `${rangeCount} transactions`}</p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">Selected Range</p>
+              {loading ? (
+                <div className="bg-[#1C1C1C] h-9 w-28 rounded animate-pulse mb-2" />
+              ) : (
+                <p className="text-white text-[32px] font-black leading-none">
+                  ₹{rangeTotal.toLocaleString("en-IN")}
+                </p>
+              )}
+              <p className="text-[#c9c9c9] text-[11px] mt-2">{loading ? "—" : `${rangeCount} transactions`}</p>
+            </div>
+          </div>
         </div>
 
         {/* By Mode */}
-        <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5">
-          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">By Mode</p>
-          {loading ? (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => <div key={i} className="bg-[#1C1C1C] h-5 rounded animate-pulse" />)}
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">By Mode</p>
+              {loading ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => <div key={i} className="bg-[#1C1C1C] h-5 rounded animate-pulse" />)}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#c9c9c9] text-[12px]">Cash</span>
+                    <span className="text-[#10B981] text-[12px] font-medium">₹{cashTotal.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#c9c9c9] text-[12px]">UPI</span>
+                    <span className="text-[#3B82F6] text-[12px] font-medium">₹{upiTotal.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[#c9c9c9] text-[12px]">Card</span>
+                    <span className="text-[#8B5CF6] text-[12px] font-medium">₹{cardTotal.toLocaleString("en-IN")}</span>
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-[#555555] text-[12px]">Cash</span>
-                <span className="text-[#10B981] text-[12px] font-medium">₹{cashTotal.toLocaleString("en-IN")}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[#555555] text-[12px]">UPI</span>
-                <span className="text-[#3B82F6] text-[12px] font-medium">₹{upiTotal.toLocaleString("en-IN")}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[#555555] text-[12px]">Card</span>
-                <span className="text-[#8B5CF6] text-[12px] font-medium">₹{cardTotal.toLocaleString("en-IN")}</span>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Filtered Total */}
-        <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5">
-          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">Filtered Total</p>
-          {loading ? (
-            <div className="bg-[#1C1C1C] h-9 w-28 rounded animate-pulse mb-2" />
-          ) : (
-            <p className="text-white text-[32px] font-black leading-none">
-              ₹{allTimeTotal.toLocaleString("en-IN")}
-            </p>
-          )}
-          <p className="text-[#333333] text-[11px] mt-2">{loading ? "—" : `${validPaymentsCount} total transactions`}</p>
+        <div className="themeFxCardOuter h-[132px]">
+          <div className="themeFxCard h-[130px]">
+            <div className="themeFxCardRay" />
+            <div className="themeFxCardLine themeFxCardLineTop" />
+            <div className="themeFxCardLine themeFxCardLineBottom" />
+            <div className="themeFxCardLine themeFxCardLineLeft" />
+            <div className="themeFxCardLine themeFxCardLineRight" />
+            <div className="relative z-10">
+              <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">Filtered Total</p>
+              {loading ? (
+                <div className="bg-[#1C1C1C] h-9 w-28 rounded animate-pulse mb-2" />
+              ) : (
+                <p className="text-white text-[32px] font-black leading-none">
+                  ₹{allTimeTotal.toLocaleString("en-IN")}
+                </p>
+              )}
+              <p className="text-[#c9c9c9] text-[11px] mt-2">{loading ? "—" : `${validPaymentsCount} total transactions`}</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -652,13 +689,18 @@ export default function PaymentsPage() {
                   type="button"
                   onClick={handleSave}
                   disabled={saving || saveSuccess || dueAmount <= 0 || overDue}
-                  className={`flex-[2] text-white font-bold text-[12px] tracking-[0.1em] uppercase py-3 rounded-lg transition-all flex items-center justify-center gap-2
-                    ${saveSuccess ? "bg-[#10B981]" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98]"}
-                    ${saving ? "opacity-75 cursor-not-allowed" : "cursor-pointer"}
-                  `}
+                  className={`themeFancyBtn flex-[2] py-3 flex items-center justify-center gap-2 ${saveSuccess ? "themeFancyBtn--success" : saving ? "themeFancyBtn--loading" : modalError ? "themeFancyBtn--error" : ""} ${saving ? "cursor-not-allowed" : "cursor-pointer"}`}
                 >
-                  {saving && <Spinner />}
-                  {saveSuccess ? "Recorded ✓" : saving ? "Saving..." : "Save Payment"}
+                  {saveSuccess ? (
+                    <span className="flex items-center gap-2">Recorded ✓</span>
+                  ) : saving ? (
+                    <span className="flex items-center">
+                      <span className="themeBtnMiniLoader"><span /><span /><span /></span>
+                      <span>Saving...</span>
+                    </span>
+                  ) : (
+                    "Save Payment"
+                  )}
                 </button>
               </div>
             </div>

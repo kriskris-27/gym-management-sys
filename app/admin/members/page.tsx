@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useMembers } from "@/hooks/useMembers"
 import { useRestoreMember } from "@/hooks/useRestoreMember"
+import SpeedLoader from "@/app/components/SpeedLoader"
 
 interface Member {
   id: string
@@ -58,6 +59,15 @@ export default function MembersPage() {
   const members: Member[] = (rawData?.members ?? []) as Member[]
   const total = rawData?.total ?? 0
   const totalPages = rawData?.totalPages ?? 1
+
+  if (loading) {
+    return (
+      <div className="w-full min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+        <SpeedLoader />
+        <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading members</p>
+      </div>
+    )
+  }
 
 
   const now = new Date()
@@ -171,9 +181,9 @@ export default function MembersPage() {
         </div>
         <button
           onClick={() => router.push("/admin/members/new")}
-          className="bg-[#D11F00] hover:bg-[#B51A00] text-white font-bold text-[12px] tracking-[0.1em] uppercase px-5 py-2.5 rounded-lg transition-all duration-200 active:scale-[0.98] self-start sm:self-auto cursor-pointer"
+          className="themeFancyBtn px-5 py-2.5 self-start sm:self-auto cursor-pointer"
         >
-          + Add Member
+          <span>+ Add Member</span>
         </button>
       </div>
 
