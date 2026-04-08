@@ -14,6 +14,7 @@ import {
   restoreMember,
   softDeleteMember,
 } from "@/domain/member-lifecycle"
+import { gymNow } from "@/lib/gym-datetime"
 
 class MemberCreateBizError extends Error {
   readonly status: number
@@ -94,6 +95,14 @@ export async function GET(
     }
 
     const displaySub = planState.displaySubscription
+    const nowInstant = gymNow().toUTC().toJSDate()
+    const futurePlansCount = await prisma.subscription.count({
+      where: {
+        memberId: id,
+        status: "ACTIVE",
+        startDate: { gt: nowInstant },
+      },
+    })
 
     return NextResponse.json({
       member: {
@@ -106,7 +115,7 @@ export async function GET(
         planUiState: planState.planUiState,
         attendanceCount: _count.sessions,
         lastVisited: sessions[0]?.checkIn || null,
-        futurePlansCount: 0,
+        futurePlansCount,
       },
     })
   } catch (error) {
@@ -443,6 +452,7 @@ export async function PATCH(
         startDate: validated.data.startDate,
         endDate: validated.data.endDate,
         customPrice: validated.data.customPrice,
+        discountAmount: validated.data.discountAmount,
         manualPlanName: validated.data.manualPlanName,
         paidAmount: validated.data.paidAmount,
         paymentMode: validated.data.paymentMode,

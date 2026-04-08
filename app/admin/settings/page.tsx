@@ -32,6 +32,19 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState("")
+  const [admissionFee, setAdmissionFee] = useState(0)
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileSaved, setProfileSaved] = useState(false)
+  const [profileError, setProfileError] = useState("")
+  const [gymName, setGymName] = useState("")
+  const [gymPhone, setGymPhone] = useState("")
+  const [passSaving, setPassSaving] = useState(false)
+  const [passSaved, setPassSaved] = useState(false)
+  const [passError, setPassError] = useState("")
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
 
   const [extraPlanNames, setExtraPlanNames] = useState<string[]>([])
 
@@ -40,18 +53,32 @@ export default function SettingsPage() {
       .then((res) => res.json())
       .then((data) => {
         if (data.pricing) setPricing(data.pricing)
+        setAdmissionFee(Number(data.admissionFee ?? 0) || 0)
         if (Array.isArray(data.extraActivePlanNames)) {
           setExtraPlanNames(data.extraActivePlanNames)
         }
       })
       .catch(() => setError("Failed to load pricing"))
       .finally(() => setLoading(false))
+
+    fetch("/api/settings/profile")
+      .then((res) => res.json())
+      .then((data) => {
+        setGymName(String(data.gymName ?? ""))
+        setGymPhone(String(data.gymPhone ?? ""))
+      })
+      .catch(() => setProfileError("Failed to load gym details"))
+      .finally(() => setProfileLoading(false))
   }, [])
 
   const handleSave = async () => {
     const isInvalid = pricing.some(p => isNaN(p.amount) || p.amount < 0 || p.amount > 99999)
     if (isInvalid) {
       setError("Price must be between ₹0 and ₹99,999")
+      return
+    }
+    if (isNaN(admissionFee) || admissionFee < 0 || admissionFee > 99999) {
+      setError("Admission fee must be between ₹0 and ₹99,999")
       return
     }
 
@@ -62,7 +89,7 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings/pricing", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pricing })
+        body: JSON.stringify({ pricing, admissionFee })
       })
 
       if (res.ok) {
@@ -88,6 +115,71 @@ export default function SettingsPage() {
     ))
   }
 
+  const handleSaveProfile = async () => {
+    if (!gymName.trim()) {
+      setProfileError("Gym name is required")
+      return
+    }
+    if (!gymPhone.trim()) {
+      setProfileError("Gym phone is required")
+      return
+    }
+    setProfileSaving(true)
+    setProfileError("")
+    try {
+      const res = await fetch("/api/settings/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gymName: gymName.trim(), gymPhone: gymPhone.trim() }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setProfileError(body.error || "Failed to save gym details")
+        return
+      }
+      setProfileSaved(true)
+      setTimeout(() => setProfileSaved(false), 2000)
+    } catch {
+      setProfileError("Network error. Failed to save gym details.")
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPassError("All password fields are required")
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPassError("New password and confirm password must match")
+      return
+    }
+    setPassSaving(true)
+    setPassError("")
+    try {
+      const res = await fetch("/api/settings/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setPassError(body.error || "Failed to change password")
+        return
+      }
+      setCurrentPassword("")
+      setNewPassword("")
+      setConfirmPassword("")
+      setPassSaved(true)
+      setTimeout(() => setPassSaved(false), 2000)
+    } catch {
+      setPassError("Network error. Failed to change password.")
+    } finally {
+      setPassSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-[#080808]">
@@ -100,7 +192,104 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-[#080808] p-8 animate-in fade-in duration-400">
       <div className="mb-8">
         <h1 className="text-[28px] font-black text-white">Settings</h1>
-        <p className="text-[13px] text-[#444444] mt-1">Manage your gym plan pricing</p>
+        <p className="text-[13px] text-[#444444] mt-1">Manage gym details, security, and pricing</p>
+      </div>
+
+      <div className="max-w-[560px] bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 mb-5">
+        <div className="border-b border-[#1C1C1C] pb-4 mb-6">
+          <h2 className="text-[16px] font-bold text-white">Gym Details</h2>
+          <p className="text-[12px] text-[#444444] mt-1">Update gym name and contact number</p>
+        </div>
+
+        {profileLoading ? (
+          <div className="h-24 bg-[#1C1C1C] rounded animate-pulse" />
+        ) : (
+          <>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Gym Name</label>
+                <input
+                  type="text"
+                  value={gymName}
+                  onChange={(e) => setGymName(e.target.value)}
+                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:outline-none transition-all"
+                  placeholder="Royal Fitness"
+                />
+              </div>
+              <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Gym Phone</label>
+                <input
+                  type="text"
+                  value={gymPhone}
+                  onChange={(e) => setGymPhone(e.target.value)}
+                  className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:outline-none transition-all"
+                  placeholder="+91-9876543210"
+                />
+              </div>
+            </div>
+            {profileError && <p className="text-[11px] text-[#D11F00] mt-4">{profileError}</p>}
+            <button
+              onClick={handleSaveProfile}
+              disabled={profileSaving}
+              className={`mt-6 w-full font-bold text-[12px] uppercase tracking-[0.1em] py-3.5 rounded-lg transition-all duration-200 active:scale-[0.98] flex items-center justify-center gap-2
+                ${profileSaved ? "bg-green-600 text-white hover:bg-green-500" : "bg-[#D11F00] text-white hover:bg-[#B51A00]"}
+                ${profileSaving ? "opacity-80 cursor-not-allowed" : ""}
+              `}
+            >
+              {profileSaving && <Spinner className="w-4 h-4" />}
+              {profileSaved ? "Saved ✓" : profileSaving ? "Saving..." : "Save Gym Details"}
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="max-w-[560px] bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 mb-5">
+        <div className="border-b border-[#1C1C1C] pb-4 mb-6">
+          <h2 className="text-[16px] font-bold text-white">Change Password</h2>
+          <p className="text-[12px] text-[#444444] mt-1">Update your login password</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Current Password</label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:outline-none transition-all"
+            />
+          </div>
+          <div>
+            <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">New Password</label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:outline-none transition-all"
+            />
+          </div>
+          <div>
+            <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Confirm New Password</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:outline-none transition-all"
+            />
+          </div>
+        </div>
+        {passError && <p className="text-[11px] text-[#D11F00] mt-4">{passError}</p>}
+        <button
+          onClick={handleChangePassword}
+          disabled={passSaving}
+          className={`mt-6 w-full font-bold text-[12px] uppercase tracking-[0.1em] py-3.5 rounded-lg transition-all duration-200 active:scale-[0.98] flex items-center justify-center gap-2
+            ${passSaved ? "bg-green-600 text-white hover:bg-green-500" : "bg-[#D11F00] text-white hover:bg-[#B51A00]"}
+            ${passSaving ? "opacity-80 cursor-not-allowed" : ""}
+          `}
+        >
+          {passSaving && <Spinner className="w-4 h-4" />}
+          {passSaved ? "Password Updated ✓" : passSaving ? "Updating..." : "Change Password"}
+        </button>
       </div>
 
       <div className="max-w-[560px] bg-[#111111] border border-[#1C1C1C] rounded-xl p-6">
@@ -118,6 +307,29 @@ export default function SettingsPage() {
           <p className="text-[12px] text-[#444444] mt-1">
             Set the standard price for each membership plan
           </p>
+        </div>
+
+        <div className="flex justify-between items-center py-4 border-b border-[#0D0D0D]">
+          <div className="flex flex-col">
+            <span className="text-[13px] font-medium text-white">Admission Fee</span>
+            <span className="text-[11px] text-[#444444]">Applied only when enabled at Add Member</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] text-[#444444]">₹</span>
+            <input
+              type="number"
+              min="0"
+              max="99999"
+              value={admissionFee || ""}
+              onChange={(e) => setAdmissionFee(e.target.value === "" ? 0 : Number(e.target.value))}
+              onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+              }}
+              className="w-[120px] bg-[#0F0F0F] border border-[#242424] text-white text-[13px] text-right px-3 py-2 rounded-lg focus:border-[#D11F00] focus:outline-none transition-colors duration-200"
+              placeholder="0"
+            />
+          </div>
         </div>
 
         <div className="flex flex-col">
@@ -140,6 +352,10 @@ export default function SettingsPage() {
                     max="99999"
                     value={plan.amount || ""}
                     onChange={(e) => updatePrice(plan.membershipType, e.target.value)}
+                    onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                    }}
                     className="w-[120px] bg-[#0F0F0F] border border-[#242424] text-white text-[13px] text-right px-3 py-2 rounded-lg focus:border-[#D11F00] focus:outline-none transition-colors duration-200"
                     placeholder="0"
                   />

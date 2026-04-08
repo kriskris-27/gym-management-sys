@@ -3,7 +3,8 @@
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
 import { useMonthlyReport } from "@/hooks/useReports"
-import { gymNow } from "@/lib/gym-datetime"
+import { DateTime } from "luxon"
+import { GYM_TIMEZONE, gymNow } from "@/lib/gym-datetime"
 
 function currentISTYear() {
   return gymNow().year
@@ -18,10 +19,6 @@ const BarChart = dynamic(
 )
 const Bar = dynamic(
   () => import("recharts").then((m) => ({ default: m.Bar })),
-  { ssr: false }
-)
-const LineChart = dynamic(
-  () => import("recharts").then((m) => ({ default: m.LineChart })),
   { ssr: false }
 )
 const ComposedChart = dynamic(
@@ -95,12 +92,8 @@ const PLAN_ORDER = [
 ] as const
 
 function formatBarTooltipLabel(dateStr: string) {
-  const d = new Date(dateStr + "T12:00:00+05:30")
-  return d.toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  })
+  const d = DateTime.fromISO(dateStr, { zone: GYM_TIMEZONE })
+  return d.isValid ? d.toFormat("d LLL yyyy") : dateStr
 }
 
 function formatHourTick(h: number) {
@@ -119,6 +112,8 @@ type MonthlyReport = {
     total: number
     expectedTotal: number
     gap: number
+    discountTotal: number
+    pendingAfterDiscount: number
     byPlan: Record<string, number>
     byMode: { CASH: number; UPI: number; CARD: number }
     dailyBreakdown: { date: string; amount: number; count: number }[]
@@ -435,9 +430,16 @@ export default function AdminReportsPage() {
           <p className="mt-2 text-[32px] font-black text-[#F59E0B]">
             ₹{(data?.revenue.expectedTotal ?? 0).toLocaleString("en-IN")}
           </p>
-          {data?.revenue.gap && data.revenue.gap > 0 ? (
+          {(data?.revenue.pendingAfterDiscount ?? 0) > 0 ? (
             <p className="mt-1 text-[12px] text-[#D11F00] font-medium">
-              Gap: ₹{data.revenue.gap.toLocaleString("en-IN")} pending
+              Pending: ₹{(data?.revenue.pendingAfterDiscount ?? 0).toLocaleString("en-IN")}
+              {(data?.revenue.discountTotal ?? 0) > 0
+                ? ` (after ₹${(data?.revenue.discountTotal ?? 0).toLocaleString("en-IN")} discount)`
+                : ""}
+            </p>
+          ) : (data?.revenue.gap ?? 0) > 0 ? (
+            <p className="mt-1 text-[12px] text-[#10B981] font-medium">
+              No pending. ₹{(data?.revenue.gap ?? 0).toLocaleString("en-IN")} is discount-adjusted.
             </p>
           ) : (
             <p className="mt-1 text-[12px] text-[#10B981] font-medium">

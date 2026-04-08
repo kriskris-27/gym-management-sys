@@ -68,6 +68,7 @@ export const MemberCreateSchema = z.object({
     z.number().min(0, "Paid amount cannot be negative").max(99999, "Amount too high").default(0)
   ),
   paymentMode: PaymentModeEnum.default("CASH"),
+  includeAdmission: z.boolean().optional().default(false),
   manualPlanName: z.string().trim().max(100).optional(),
   manualAmount: z.coerce.number().min(0).max(99999).optional(),
 }).strict()
@@ -188,8 +189,32 @@ export const PricingItemSchema = z.object({
 export const PricingUpdateSchema = z.object({
   pricing: z.array(PricingItemSchema)
     .min(1, "At least one plan required")
-    .max(5, "Maximum 5 plans allowed")
+    .max(5, "Maximum 5 plans allowed"),
+  admissionFee: z.coerce.number()
+    .min(0, "Admission fee cannot be negative")
+    .max(99999, "Admission fee too large")
+    .optional(),
 }).strict();
+
+/**
+ * Gym profile settings
+ */
+export const GymProfileUpdateSchema = z.object({
+  gymName: z.string().trim().min(2, "Gym name is too short").max(120, "Gym name is too long"),
+  gymPhone: z.string().trim().min(6, "Phone is too short").max(30, "Phone is too long"),
+}).strict();
+
+/**
+ * Change password
+ */
+export const ChangePasswordSchema = z.object({
+  currentPassword: z.string().min(6, "Current password is required"),
+  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+  confirmPassword: z.string().min(6, "Confirm password is required"),
+}).strict().refine((d) => d.newPassword === d.confirmPassword, {
+  message: "New password and confirm password must match",
+  path: ["confirmPassword"],
+});
 /**
  * Member Renewal
  */
@@ -206,6 +231,11 @@ export const RenewMemberSchema = z.object({
     .min(0, "Price cannot be negative")
     .max(99999, "Price too large")
     .optional(),
+  discountAmount: z.coerce.number()
+    .min(0, "Discount cannot be negative")
+    .max(99999, "Discount too large")
+    .optional()
+    .default(0),
   manualPlanName: z.string().optional(),
   paidAmount: z.preprocess(
     (val) => (val === "" || val === null || val === undefined) ? 0 : Number(val),
@@ -220,6 +250,32 @@ export const RenewMemberSchema = z.object({
       return !Number.isNaN(Date.parse(data.startDate))
     },
     { message: "Invalid start date", path: ["startDate"] }
+  )
+  .refine(
+    (data) => {
+      if (data.membershipType !== "OTHERS") return true
+      const nameOk = !!data.manualPlanName?.trim()
+      const amountOk = typeof data.customPrice === "number" && Number.isFinite(data.customPrice)
+      const endOk = !!data.endDate && !Number.isNaN(Date.parse(data.endDate))
+      return nameOk && amountOk && endOk
+    },
+    {
+      message: "For OTHERS, plan name, amount, and end date are required.",
+      path: ["membershipType"],
+    }
+  )
+  .refine(
+    (data) => {
+      const base = Math.round(data.customPrice ?? 0)
+      const disc = Math.round(data.discountAmount ?? 0)
+      if (data.membershipType === "OTHERS" && disc > base) return false
+      if (data.membershipType !== "OTHERS" && data.customPrice != null && disc > base) return false
+      return true
+    },
+    {
+      message: "Discount cannot exceed plan amount.",
+      path: ["discountAmount"],
+    }
   );
 
 /**

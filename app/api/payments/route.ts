@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
+import { DateTime } from "luxon"
 import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
+import type { Prisma } from "@prisma/client"
 import { PaymentCreateSchema } from "@/lib/validations"
+import { GYM_TIMEZONE } from "@/lib/gym-datetime"
 import {
   assertGlobalPaymentAllowed,
   assertNoCurrentPlanOverpay,
@@ -24,7 +27,7 @@ export async function GET(request: Request) {
   const mode = searchParams.get("mode")
 
   try {
-    const where: any = {}
+    const where: Prisma.PaymentWhereInput = {}
 
     // Link by specific member
     if (memberId) where.memberId = memberId
@@ -33,24 +36,26 @@ export async function GET(request: Request) {
     if (startDate || endDate) {
       where.createdAt = {}
       if (startDate) {
-        const parsed = new Date(startDate)
-        if (isNaN(parsed.getTime())) {
+        const parsed = DateTime.fromISO(startDate, { zone: GYM_TIMEZONE }).startOf("day")
+        const parsedJs = parsed.toUTC().toJSDate()
+        if (isNaN(parsedJs.getTime())) {
           return NextResponse.json(
             { error: "Invalid startDate format" },
             { status: 400 }
           )
         }
-        where.createdAt.gte = parsed
+        where.createdAt.gte = parsedJs
       }
       if (endDate) {
-        const parsed = new Date(endDate)
-        if (isNaN(parsed.getTime())) {
+        const parsed = DateTime.fromISO(endDate, { zone: GYM_TIMEZONE }).endOf("day")
+        const parsedJs = parsed.toUTC().toJSDate()
+        if (isNaN(parsedJs.getTime())) {
           return NextResponse.json(
             { error: "Invalid endDate format" },
             { status: 400 }
           )
         }
-        where.createdAt.lte = parsed
+        where.createdAt.lte = parsedJs
       }
     }
 
@@ -69,7 +74,16 @@ export async function GET(request: Request) {
       prisma.payment.findMany({
         where,
         include: {
-          member: { select: { name: true } }
+          member: { select: { name: true } },
+          subscription: {
+            select: {
+              id: true,
+              planNameSnapshot: true,
+              startDate: true,
+              endDate: true,
+              status: true,
+            },
+          },
         },
         orderBy: { createdAt: "desc" },
         skip,
@@ -78,11 +92,22 @@ export async function GET(request: Request) {
       prisma.payment.count({ where })
     ])
 
-    const formattedPayments = payments.map((p: any) => ({
+    const formattedPayments = payments.map((p) => ({
       id: p.id,
       memberId: p.memberId,
       memberName: p.member.name,
+      subscriptionId: p.subscriptionId ?? null,
+      subscription: p.subscription
+        ? {
+            id: p.subscription.id,
+            planNameSnapshot: p.subscription.planNameSnapshot,
+            startDate: p.subscription.startDate.toISOString(),
+            endDate: p.subscription.endDate.toISOString(),
+            status: p.subscription.status,
+          }
+        : null,
       amount: p.finalAmount,
+      discountAmount: p.discountAmount || 0,
       date: p.createdAt.toISOString(),
       mode: p.method,
       notes: p.notes
@@ -95,7 +120,7 @@ export async function GET(request: Request) {
       limit
     }, {
       headers: {
-        "Cache-Control": "s-maxage=30, stale-while-revalidate"
+        "Cache-Control": "private, no-store, max-age=0"
       }
     })
 
@@ -179,8 +204,44 @@ export async function POST(request: Request) {
       subscriptionId = null
       baseAmount = payRounded
     } else {
-      subscriptionId = null
-      baseAmount = payRounded
+      // No live plan (expired / no check-in window). If the latest non-cancelled plan
+      // still has dues, auto-attach this payment to that plan so plan-wise history stays correct.
+      const latestSub = await prisma.subscription.findFirst({
+        where: { memberId: data.memberId, status: { not: "CANCELLED" } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, planPriceSnapshot: true },
+      })
+
+      if (latestSub) {
+        const s = await prisma.payment.aggregate({
+          where: { memberId: data.memberId, subscriptionId: latestSub.id, status: "SUCCESS" },
+          _sum: { finalAmount: true, discountAmount: true },
+        })
+        const paid = Math.round((s._sum.finalAmount || 0) + (s._sum.discountAmount || 0))
+        const planAmount = Math.round(latestSub.planPriceSnapshot || 0)
+        const remaining = Math.max(0, planAmount - paid)
+
+        if (remaining > 1 && payRounded <= remaining + 1) {
+          const planGuard = assertNoCurrentPlanOverpay({
+            amount: data.amount,
+            remaining,
+          })
+          if (!planGuard.ok) {
+            return NextResponse.json(
+              { error: planGuard.message, code: planGuard.code },
+              { status: planGuard.code === "CURRENT_PLAN_FULLY_PAID" ? 409 : 400 }
+            )
+          }
+          subscriptionId = latestSub.id
+          baseAmount = planAmount
+        } else {
+          subscriptionId = null
+          baseAmount = payRounded
+        }
+      } else {
+        subscriptionId = null
+        baseAmount = payRounded
+      }
     }
 
     // 2. Insert into Ledger
@@ -192,7 +253,7 @@ export async function POST(request: Request) {
         discountAmount: 0,
         finalAmount: data.amount,               // The actual cash/upi paid
         createdAt: data.date,
-        method: (data.mode as any),
+        method: data.mode,
         notes: data.notes || "",
         status: "SUCCESS",
         purpose: "SUBSCRIPTION"

@@ -541,7 +541,9 @@ export async function getMemberSubscriptionFinancialSummary(memberId: string): P
 }> {
   console.log(`[Payment Domain] Computing global balance for member: ${memberId}`)
 
-  // 1. Get Active Subscription (if any) for current status display
+  // 1) Get live subscription (covers now in gym timezone) for "current plan" numbers.
+  // This MUST match renewal guards and handle orphan payments consistently.
+  const livePlan = await getLivePlanPaymentRemaining(memberId)
   const activeSubscription = await getActiveSubscription(memberId)
 
   const { totalAmount, totalPaid, remaining, isPaidFull } = await computeGlobalMemberLedger(memberId)
@@ -551,17 +553,9 @@ export async function getMemberSubscriptionFinancialSummary(memberId: string): P
     orderBy: { createdAt: 'desc' }
   })
 
-  const currentTargetSubId = activeSubscription?.id || latestSubscription?.id
-  const currentPlanAmount = latestSubscription?.planPriceSnapshot || 0
-  const currentPlanPaymentSummary = currentTargetSubId
-    ? await prisma.payment.aggregate({
-        where: { memberId, subscriptionId: currentTargetSubId, status: "SUCCESS" },
-        _sum: { finalAmount: true, discountAmount: true },
-      })
-    : { _sum: { finalAmount: 0, discountAmount: 0 } as { finalAmount: number; discountAmount: number } }
-  const currentPlanPaid = currentPlanPaymentSummary._sum.finalAmount || 0
-  const currentPlanDiscount = currentPlanPaymentSummary._sum.discountAmount || 0
-  const currentPlanRemaining = Math.round(currentPlanAmount - (currentPlanPaid + currentPlanDiscount))
+  const currentPlanAmount = livePlan.planAmount
+  const currentPlanPaid = livePlan.paid
+  const currentPlanRemaining = livePlan.remaining
 
   return {
     totalAmount,

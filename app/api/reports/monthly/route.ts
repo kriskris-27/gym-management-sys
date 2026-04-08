@@ -105,6 +105,9 @@ export async function GET(request: Request) {
 
     // Sales Revenue (Accrual) Logic
     const expectedRevenueTotal = monthlySubscriptions.reduce((sum, s) => sum + (s.planPriceSnapshot || 0), 0)
+    const totalDiscountGiven = payments.reduce((sum, p: any) => sum + (p.discountAmount || 0), 0)
+    const gapBeforeDiscount = Math.max(0, expectedRevenueTotal - revenueCollected)
+    const pendingAfterDiscount = Math.max(0, expectedRevenueTotal - (revenueCollected + totalDiscountGiven))
 
     // Improved Renewal Logic: Unique members who paid this month and existed before
     const membersWhoPaid = new Set(payments.filter(p => p.finalAmount > 0).map(p => p.memberId))
@@ -149,7 +152,9 @@ export async function GET(request: Request) {
       revenue: {
         total: revenueCollected,
         expectedTotal: expectedRevenueTotal, // Total plan value sold this month
-        gap: Math.max(0, expectedRevenueTotal - revenueCollected), // What's still pending
+        gap: gapBeforeDiscount, // Gross gap before discount adjustment
+        discountTotal: totalDiscountGiven,
+        pendingAfterDiscount, // Actual pending after discount adjustment
         byPlan: revenueByPlan,
         byMode: revenueByMode,
         dailyBreakdown: Object.entries(dailyRevenueSummary).map(([date, stats]) => ({ date, ...stats }))

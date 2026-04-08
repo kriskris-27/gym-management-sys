@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { usePayments } from "@/hooks/usePayments"
 import { firstDayOfMonthYmdInGym, todayYmdInIST } from "@/lib/gym-datetime"
+import type { MemberFinancials } from "@/lib/financial-service"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,12 +26,7 @@ interface MemberResult {
   membershipType: string
 }
 
-interface PaymentSummary {
-  dueAmount: number
-  totalPaid: number
-  remaining: number
-  isPaidFull: boolean
-}
+type PaymentSummary = MemberFinancials
 
 function formatPaymentDate(dateStr: string): string {
   if (!dateStr) return "—"
@@ -55,15 +51,19 @@ export default function PaymentsPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
 
-  // Data via React Query
-  const { data: rawPaymentsData, isLoading: loading } = usePayments()
-  const payments: Payment[] = rawPaymentsData?.payments ?? []
-
   // Filters
   const [search, setSearch] = useState("")
   const [modeFilter, setModeFilter] = useState("All")
   const [dateFrom, setDateFrom] = useState(firstDayOfMonthYmdInGym())
   const [dateTo, setDateTo] = useState(todayYmdInIST())
+
+  // Data via React Query (server-side mode/date filtering)
+  const { data: rawPaymentsData, isLoading: loading } = usePayments({
+    mode: modeFilter,
+    startDate: dateFrom,
+    endDate: dateTo,
+  })
+  const payments: Payment[] = rawPaymentsData?.payments ?? []
 
   // Modal state
   const [showModal, setShowModal] = useState(false)
@@ -87,32 +87,21 @@ export default function PaymentsPage() {
   const filtered = payments.filter((p) => {
     // Hide zero-amount payments from the global ledger
     if (p.amount <= 0) return false
-
+    
     const matchesSearch = p.memberName.toLowerCase().includes(search.toLowerCase())
-    const matchesMode = modeFilter === "All" ? true : p.mode === modeFilter.toUpperCase()
-    const payDate = new Date(p.date.split("T")[0])
-    const from = new Date(dateFrom)
-    const to = new Date(dateTo)
-    const matchesDate = payDate >= from && payDate <= to
-    return matchesSearch && matchesMode && matchesDate
+    return matchesSearch
   })
 
-  // ─── Stats (from ALL payments, not filtered) ──────────────────────────────
+  // ─── Stats (same dataset logic as table) ──────────────────────────────────
 
-  const now = new Date()
-  const thisMonthPayments = payments.filter((p) => {
-    if (p.amount <= 0) return false // Hide zeros
-    const d = new Date(p.date.split("T")[0])
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
-  })
-  const thisMonthTotal = thisMonthPayments.reduce((s, p) => s + p.amount, 0)
-  const thisMonthCount = thisMonthPayments.length
+  const rangeTotal = filtered.reduce((s, p) => s + p.amount, 0)
+  const rangeCount = filtered.length
 
-  const validPaymentsCount = payments.filter(p => p.amount > 0).length
-  const allTimeTotal = payments.reduce((s, p) => s + p.amount, 0)
-  const cashTotal = payments.filter((p) => p.mode === "CASH").reduce((s, p) => s + p.amount, 0)
-  const upiTotal = payments.filter((p) => p.mode === "UPI").reduce((s, p) => s + p.amount, 0)
-  const cardTotal = payments.filter((p) => p.mode === "CARD").reduce((s, p) => s + p.amount, 0)
+  const validPaymentsCount = filtered.length
+  const allTimeTotal = filtered.reduce((s, p) => s + p.amount, 0)
+  const cashTotal = filtered.filter((p) => p.mode === "CASH").reduce((s, p) => s + p.amount, 0)
+  const upiTotal = filtered.filter((p) => p.mode === "UPI").reduce((s, p) => s + p.amount, 0)
+  const cardTotal = filtered.filter((p) => p.mode === "CARD").reduce((s, p) => s + p.amount, 0)
 
   // ─── Member search in modal ───────────────────────────────────────────────
 
@@ -184,6 +173,9 @@ export default function PaymentsPage() {
     const amt = Number(modalAmount)
     if (!modalAmount || isNaN(amt) || amt <= 0) { setModalError("Enter a valid amount greater than ₹0"); return }
     if (amt > 99999) { setModalError("Amount too high (max ₹99,999)"); return }
+    const due = Math.max(0, Math.round(Number(selectedSummary?.remaining ?? 0)))
+    if (due <= 0) { setModalError("No due amount pending for this member."); return }
+    if (amt > due) { setModalError(`Amount cannot exceed due amount (₹${due.toLocaleString("en-IN")}).`); return }
     if (!modalDate) { setModalError("Select a date"); return }
 
     setSaving(true)
@@ -223,8 +215,9 @@ export default function PaymentsPage() {
 
   // Live running total calc
   const enteredAmt = Number(modalAmount) || 0
-  const afterPayment = (selectedSummary?.totalPaid ?? 0) + enteredAmt
-  const afterRemaining = (selectedSummary?.dueAmount ?? 0) - afterPayment
+  const dueAmount = Math.max(0, Math.round(Number(selectedSummary?.remaining ?? 0)))
+  const overDue = dueAmount > 0 && enteredAmt > dueAmount
+  const afterRemaining = Math.max(0, (selectedSummary?.remaining ?? 0) - enteredAmt)
 
   // ─── Mode badge helper ────────────────────────────────────────────────────
 
@@ -269,17 +262,17 @@ export default function PaymentsPage() {
 
       {/* ── STAT CARDS ── */}
       <div className="grid grid-cols-3 gap-4 mt-6 animate-page">
-        {/* This Month */}
+        {/* Selected Range */}
         <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5">
-          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">This Month</p>
+          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">Selected Range</p>
           {loading ? (
             <div className="bg-[#1C1C1C] h-9 w-28 rounded animate-pulse mb-2" />
           ) : (
             <p className="text-white text-[32px] font-black leading-none">
-              ₹{thisMonthTotal.toLocaleString("en-IN")}
+              ₹{rangeTotal.toLocaleString("en-IN")}
             </p>
           )}
-          <p className="text-[#333333] text-[11px] mt-2">{loading ? "—" : `${thisMonthCount} transactions`}</p>
+          <p className="text-[#333333] text-[11px] mt-2">{loading ? "—" : `${rangeCount} transactions`}</p>
         </div>
 
         {/* By Mode */}
@@ -307,9 +300,9 @@ export default function PaymentsPage() {
           )}
         </div>
 
-        {/* All Time */}
+        {/* Filtered Total */}
         <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-5">
-          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">All Time</p>
+          <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold mb-3">Filtered Total</p>
           {loading ? (
             <div className="bg-[#1C1C1C] h-9 w-28 rounded animate-pulse mb-2" />
           ) : (
@@ -533,8 +526,15 @@ export default function PaymentsPage() {
               summaryLoading ? (
                 <div className="bg-[#0F0F0F] border border-[#1C1C1C] rounded-lg px-4 py-3 mb-5 h-12 animate-pulse" />
               ) : selectedSummary ? (
-                <div className="bg-[#0F0F0F] border border-[#1C1C1C] rounded-lg px-4 py-3 mb-5 flex justify-between items-center">
-                  <span className="text-[#444444] text-[12px]">Remaining Balance</span>
+                <div className="bg-[#0F0F0F] border border-[#1C1C1C] rounded-lg px-4 py-3 mb-5 flex justify-between items-start gap-4">
+                  <div className="flex flex-col">
+                    <span className="text-[#444444] text-[12px]">Global Remaining</span>
+                    {typeof selectedSummary.currentPlanRemaining === "number" && selectedSummary.currentPlanAmount > 0 && (
+                      <span className="text-[#333333] text-[11px] mt-0.5">
+                        Current plan remaining: ₹{Math.max(0, Math.round(selectedSummary.currentPlanRemaining)).toLocaleString("en-IN")}
+                      </span>
+                    )}
+                  </div>
                   {selectedSummary.remaining > 0 ? (
                     <span className="text-[#D11F00] text-[16px] font-black">₹{selectedSummary.remaining.toLocaleString("en-IN")}</span>
                   ) : selectedSummary.remaining === 0 ? (
@@ -546,6 +546,21 @@ export default function PaymentsPage() {
               ) : null
             )}
 
+            {selectedMember && selectedSummary && dueAmount <= 0 && (
+              <div className="bg-[#10B981]/10 border border-[#10B981]/20 rounded-lg px-4 py-3 mb-5">
+                <p className="text-[#10B981] text-[12px] font-medium">
+                  No due amount pending. You can&apos;t record a payment above ₹0.
+                </p>
+              </div>
+            )}
+            {selectedMember && selectedSummary && overDue && (
+              <div className="bg-[#D11F00]/10 border border-[#D11F00]/20 rounded-lg px-4 py-3 mb-5">
+                <p className="text-[#D11F00] text-[12px] font-medium">
+                  Amount cannot exceed due amount (₹{dueAmount.toLocaleString("en-IN")}).
+                </p>
+              </div>
+            )}
+
             <div className="space-y-4">
               {/* Amount */}
               <div>
@@ -554,10 +569,20 @@ export default function PaymentsPage() {
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] text-[14px] font-medium">₹</span>
                   <input
                     type="number"
-                    min="1"
-                    max="99999"
+                    min="0"
+                    max={Math.max(0, Math.round(Number(selectedSummary?.remaining ?? 0)))}
                     value={modalAmount}
-                    onChange={(e) => setModalAmount(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      const n = raw === "" ? 0 : Number(raw)
+                      const next = Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0
+                      const clamped = dueAmount > 0 ? Math.min(next, dueAmount) : 0
+                      setModalAmount(String(clamped))
+                    }}
+                    onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                    }}
                     placeholder="0"
                     className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all font-bold"
                   />
@@ -626,7 +651,7 @@ export default function PaymentsPage() {
                 <button
                   type="button"
                   onClick={handleSave}
-                  disabled={saving || saveSuccess}
+                  disabled={saving || saveSuccess || dueAmount <= 0 || overDue}
                   className={`flex-[2] text-white font-bold text-[12px] tracking-[0.1em] uppercase py-3 rounded-lg transition-all flex items-center justify-center gap-2
                     ${saveSuccess ? "bg-[#10B981]" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98]"}
                     ${saving ? "opacity-75 cursor-not-allowed" : "cursor-pointer"}

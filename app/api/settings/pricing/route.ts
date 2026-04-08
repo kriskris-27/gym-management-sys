@@ -10,6 +10,7 @@ const ORDER: ("MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS")[] =
   "ANNUAL",
   "OTHERS"
 ]
+const ADMISSION_FEE_KEY = "admission_fee"
 
 export async function GET() {
   const auth = await requireAuthUser("GET /api/settings/pricing")
@@ -41,8 +42,15 @@ export async function GET() {
       .filter((p) => !orderSet.has(p.name))
       .map((p) => p.name)
 
+    const admissionFeeSetting = await prisma.setting.findUnique({
+      where: { key: ADMISSION_FEE_KEY },
+      select: { value: true },
+    })
+    const admissionFee = Number(admissionFeeSetting?.value ?? 0) || 0
+
     return NextResponse.json({
       pricing,
+      admissionFee,
       activePlans,
       ...(extraActivePlanNames.length > 0
         ? { extraActivePlanNames }
@@ -73,6 +81,8 @@ export async function PUT(request: Request) {
     }
 
     const inputPricing = validated.data.pricing
+    const rawAdmission = Number((body as { admissionFee?: unknown })?.admissionFee ?? 0)
+    const admissionFee = Number.isFinite(rawAdmission) ? Math.max(0, Math.min(99999, Math.round(rawAdmission))) : 0
 
     const DURATIONS: Record<string, number> = {
       "MONTHLY": 30,
@@ -83,19 +93,24 @@ export async function PUT(request: Request) {
     }
 
     // Upsert the Plan table based on the pricing input
-    await prisma.$transaction(
-      inputPricing.map(p => 
+    await prisma.$transaction([
+      ...inputPricing.map(p =>
         prisma.plan.upsert({
           where: { name: p.membershipType },
           update: { price: p.amount },
-          create: { 
-            name: p.membershipType, 
+          create: {
+            name: p.membershipType,
             price: p.amount,
             durationDays: DURATIONS[p.membershipType] || 30
           }
         })
-      )
-    )
+      ),
+      prisma.setting.upsert({
+        where: { key: ADMISSION_FEE_KEY },
+        update: { value: admissionFee },
+        create: { key: ADMISSION_FEE_KEY, value: admissionFee },
+      }),
+    ])
 
     // Re-fetch sorted data to return
     const updatedPlans = await prisma.plan.findMany({
@@ -108,7 +123,7 @@ export async function PUT(request: Request) {
       return { membershipType: type, amount: found ? found.price : 0 };
     });
 
-    return NextResponse.json({ success: true, pricing: updatedPricing })
+    return NextResponse.json({ success: true, pricing: updatedPricing, admissionFee })
 
   } catch (error) {
     console.error("Failed to update pricing:", error)

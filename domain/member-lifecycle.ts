@@ -8,6 +8,7 @@ import {
 } from "./subscription"
 import type { DateTime } from "luxon"
 import { fromDate, nowUTC } from "@/lib/utils"
+import { GYM_TIMEZONE, gymNow } from "@/lib/gym-datetime"
 
 type Tx = Prisma.TransactionClient
 type MemberAction = "renew"
@@ -31,6 +32,7 @@ type RenewPayload = {
   startDate?: string
   endDate?: string
   customPrice?: number
+  discountAmount?: number
   manualPlanName?: string
   paidAmount?: number
   paymentMode?: PaymentMethod
@@ -95,7 +97,7 @@ async function validateActionPreconditions(memberId: string, action: MemberActio
     if (hasLivePlan) {
       throw new MemberLifecycleError(
         400,
-        "Member already has an active subscription. Cancel first if you need to change plans.",
+        "Member already has an active subscription. Renew is allowed after expiry only.",
         "ALREADY_HAS_LIVE_PLAN"
       )
     }
@@ -129,8 +131,9 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
   const subscription = await prisma.$transaction(async (tx) => {
     await expireStaleActiveSubscriptionsForMember(memberId, tx)
 
-    const nowIST = nowUTC()
-    let resolvedStartDate: DateTime = nowIST
+    const nowGym = gymNow()
+    const nowInstant = nowGym.toUTC()
+    let resolvedStartDate: DateTime = nowInstant
 
     if (payload.action === "renew") {
       await applyRenewOutstandingGuard(tx, memberId)
@@ -155,10 +158,10 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
         orderBy: { endDate: "desc" },
       })
       if (expiredSub?.endDate) {
-        const expiryDay = fromDate(expiredSub.endDate).startOf("day")
-        const todayDay = nowIST.startOf("day")
+        const expiryDay = fromDate(expiredSub.endDate).setZone(GYM_TIMEZONE).startOf("day")
+        const todayDay = nowGym.startOf("day")
         const gapDays = Math.max(0, Math.floor(todayDay.diff(expiryDay, "days").days))
-        resolvedStartDate = gapDays <= 28 ? fromDate(expiredSub.endDate) : nowIST
+        resolvedStartDate = gapDays <= 28 ? fromDate(expiredSub.endDate) : nowInstant
       }
     }
 
@@ -170,7 +173,7 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
       resolvedStartDate = parsed
     }
 
-    const isImmediate = resolvedStartDate <= nowIST.plus({ minutes: 5 })
+    const isImmediate = resolvedStartDate <= nowInstant.plus({ minutes: 5 })
     if (isImmediate) {
       await tx.subscription.updateMany({
         where: { memberId, status: "ACTIVE" },
@@ -195,6 +198,18 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
     const resolvedPlanName =
       payload.membershipType === "OTHERS" ? payload.manualPlanName || "Others" : plan.name
     const resolvedBasePrice = payload.customPrice !== undefined ? payload.customPrice : plan.price
+    const resolvedDiscount = Math.round(payload.discountAmount ?? 0)
+
+    if (resolvedDiscount < 0) {
+      throw new MemberLifecycleError(400, "Discount cannot be negative.", "DISCOUNT_NEGATIVE")
+    }
+    if (resolvedDiscount > Math.round(resolvedBasePrice)) {
+      throw new MemberLifecycleError(
+        400,
+        `Discount (₹${resolvedDiscount}) cannot exceed plan amount (₹${Math.round(resolvedBasePrice)}).`,
+        "DISCOUNT_EXCEEDS_BASE"
+      )
+    }
     const resolvedEndDate = payload.endDate
       ? fromDate(new Date(payload.endDate))
       : resolvedStartDate.plus({ days: plan.durationDays })
@@ -216,7 +231,7 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
         memberId,
         subscriptionId: createdSubscription.id,
         baseAmount: resolvedBasePrice,
-        discountAmount: 0,
+        discountAmount: resolvedDiscount,
         finalAmount: payload.paidAmount ?? 0,
         method: payload.paymentMode || "CASH",
         status: "SUCCESS",
@@ -231,7 +246,12 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
         entityType: "MEMBER",
         entityId: memberId,
         action: "RENEWED",
-        after: { plan: resolvedPlanName, startDate: resolvedStartDate.toISO(), amount: resolvedBasePrice },
+        after: {
+          plan: resolvedPlanName,
+          startDate: resolvedStartDate.toISO(),
+          amount: resolvedBasePrice,
+          discount: resolvedDiscount,
+        },
       },
     })
 

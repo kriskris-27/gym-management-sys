@@ -283,7 +283,15 @@ export async function POST(request: Request) {
 
       const discount = Math.round(data.discountAmount ?? 0)
       const paid = Math.round(data.paidAmount ?? 0)
-      const base = Math.round(resolvedBasePrice)
+      let admissionFee = 0
+      if (data.includeAdmission) {
+        const admissionSetting = await tx.setting.findUnique({
+          where: { key: "admission_fee" },
+          select: { value: true },
+        })
+        admissionFee = Math.max(0, Math.round(Number(admissionSetting?.value ?? 0) || 0))
+      }
+      const base = Math.round(resolvedBasePrice) + admissionFee
 
       if (discount > base) {
         throw new MemberCreateBizError(
@@ -336,6 +344,8 @@ export async function POST(request: Request) {
             name: newMember.name,
             plan: resolvedPlanName,
             baseAmount: base,
+            admissionFee,
+            includeAdmission: !!data.includeAdmission,
             discountAmount: discount,
             netDue,
             finalAmountPaid: paid,

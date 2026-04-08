@@ -18,6 +18,7 @@ const schema = z.object({
   discountAmount: z.coerce.number().min(0, "Discount cannot be negative").max(99999, "Discount too high"),
   paidAmount: z.coerce.number().min(0, "Amount cannot be negative").max(99999, "Amount too high"),
   paymentMode: z.enum(["CASH", "UPI", "CARD"]),
+  includeAdmission: z.boolean().optional().default(false),
   startDate: z.string().min(1, "Start date required"),
   endDate: z.string().optional(),
   manualPlanName: z.string().optional(),
@@ -60,6 +61,7 @@ interface FormData {
   discountAmount: number
   paidAmount: number
   paymentMode: "CASH" | "UPI" | "CARD"
+  includeAdmission?: boolean
   startDate: string
   endDate?: string
   manualPlanName?: string
@@ -75,6 +77,7 @@ export default function AddMemberPage() {
   const [priceLoading, setPriceLoading] = useState(false)
   const [plans, setPlans] = useState<PricingPlan[]>([])
   const [basePrice, setBasePrice] = useState(0)
+  const [admissionFee, setAdmissionFee] = useState(0)
 
   const getTodayStr = () => todayYmdInIST()
 
@@ -91,6 +94,7 @@ export default function AddMemberPage() {
           const initial = data.pricing.find((p: PricingPlan) => p.membershipType === "MONTHLY")
           setBasePrice(initial?.amount || 0)
         }
+        setAdmissionFee(Number(data.admissionFee ?? 0) || 0)
       } catch (error) {
         console.error("❌ loadPlans error:", error)
       } finally {
@@ -114,6 +118,7 @@ export default function AddMemberPage() {
       discountAmount: 0,
       paidAmount: 0,
       paymentMode: "CASH",
+      includeAdmission: false,
       startDate: getTodayStr(),
       endDate: "",
       manualPlanName: "",
@@ -124,12 +129,14 @@ export default function AddMemberPage() {
   const membershipType = watch("membershipType")
   const discountAmount = watch("discountAmount")
   const manualAmount = watch("manualAmount")
+  const includeAdmission = watch("includeAdmission") || false
   
   const isOthers = membershipType === "OTHERS"
 
   // Calculate final amount: if Others, use manualAmount as base; otherwise use basePrice (fetched from plans)
   const currentBasePrice = isOthers ? (manualAmount || 0) : (basePrice || 0)
-  const finalAmount = Math.max(0, currentBasePrice - (discountAmount || 0))
+  const totalBeforeDiscount = currentBasePrice + (includeAdmission ? admissionFee : 0)
+  const finalAmount = Math.max(0, totalBeforeDiscount - (discountAmount || 0))
 
   // Instant local lookup when membershipType changes
   useEffect(() => {
@@ -327,6 +334,10 @@ export default function AddMemberPage() {
                   {...register("manualAmount", { valueAsNumber: true })}
                   type="number"
                   placeholder="e.g. 5000"
+                  onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                  }}
                   className={`w-full bg-[#0F0F0F] border ${errors.manualAmount ? 'border-[#D11F00]' : 'border-[#242424]'} text-white text-[14px] rounded-lg px-4 py-2.5 placeholder:text-[#333333] focus:border-[#D11F00] focus:outline-none transition-all`}
                 />
                 {errors.manualAmount && (
@@ -346,6 +357,9 @@ export default function AddMemberPage() {
               <div className="text-[16px] font-bold text-[#666666] pt-1">
                 ₹{currentBasePrice}
               </div>
+              <p className="text-[10px] text-[#333333] mt-1">
+                {includeAdmission ? `+ admission ₹${admissionFee}` : "Admission not added"}
+              </p>
             </div>
 
             {/* Discount Input */}
@@ -358,6 +372,10 @@ export default function AddMemberPage() {
                 type="number"
                 min="0"
                 placeholder="0"
+                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                }}
                 className={`w-full bg-[#0F0F0F] border ${errors.discountAmount ? 'border-[#D11F00]' : 'border-[#242424]'} text-white text-[14px] rounded-lg px-3 py-2.5 focus:border-[#D11F00] focus:outline-none transition-all`}
               />
             </div>
@@ -376,6 +394,24 @@ export default function AddMemberPage() {
             <p className="text-[#D11F00] text-[11px] mt-1 animate-error">{errors.discountAmount.message as string}</p>
           )}
 
+          <div className="p-4 bg-[#0A0A0A] border border-[#1C1C1C] rounded-lg">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                {...register("includeAdmission")}
+                className="h-4 w-4 rounded border-[#333333] bg-[#0F0F0F] text-[#D11F00] focus:ring-[#D11F00]/30"
+              />
+              <div>
+                <p className="text-[12px] font-bold text-white uppercase tracking-[0.08em]">
+                  Add admission fee
+                </p>
+                <p className="text-[11px] text-[#555555] mt-0.5">
+                  Applies only on member creation. Current admission fee: ₹{admissionFee.toLocaleString("en-IN")}
+                </p>
+              </div>
+            </label>
+          </div>
+
           {/* PAYMENT RECEIPT: Actual Received & Mode */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-5 bg-[#D11F00]/5 border border-[#D11F00]/10 rounded-xl relative overflow-hidden group transition-all hover:bg-[#D11F00]/8 hover:border-[#D11F00]/20">
             {/* Amount Paid Today */}
@@ -389,6 +425,10 @@ export default function AddMemberPage() {
                 type="number"
                 min="0"
                 placeholder="0"
+                onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                }}
                 className={`w-full bg-[#0F0F0F]/80 backdrop-blur-md border ${errors.paidAmount ? 'border-[#D11F00]' : 'border-[#242424]'} text-[18px] font-black text-[#D11F00] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:outline-none transition-all placeholder:text-[#222222]`}
               />
               {errors.paidAmount && (

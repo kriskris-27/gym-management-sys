@@ -49,9 +49,18 @@ interface PaymentSummary {
 interface PaymentRecord {
   id: string
   amount: number
+  discountAmount?: number
   mode: "CASH" | "UPI" | "CARD"
   date: string
   notes: string | null
+  subscriptionId?: string | null
+  subscription?: {
+    id: string
+    planNameSnapshot: string
+    startDate: string
+    endDate: string
+    status: string
+  } | null
 }
 
 interface PricingPlan {
@@ -65,6 +74,7 @@ interface RenewalFormData {
   endDate?: string
   customPrice?: number
   manualPlanName?: string
+  discountAmount?: number
   paidAmount?: number
   paymentMode?: "CASH" | "UPI" | "CARD"
 }
@@ -77,6 +87,7 @@ interface RenewalPayload {
   startDate: string
   endDate?: string
   customPrice?: number | undefined
+  discountAmount?: number | undefined
   manualPlanName?: string
   paidAmount?: number
   paymentMode?: "CASH" | "UPI" | "CARD"
@@ -457,6 +468,7 @@ export default function MemberProfilePage() {
         membershipType: data.membershipType,
         startDate: data.startDate,
         customPrice: data.customPrice ? Number(data.customPrice) : undefined,
+        discountAmount: data.discountAmount ? Number(data.discountAmount) : 0,
         manualPlanName: data.manualPlanName,
         paidAmount: data.paidAmount ? Number(data.paidAmount) : 0,
         paymentMode: data.paymentMode || "CASH"
@@ -702,6 +714,7 @@ export default function MemberProfilePage() {
                     {daysUntilEnd} day{daysUntilEnd === 1 ? "" : "s"} remaining
                   </span>
                 ) : null}
+
               </div>
             </div>
             <div>
@@ -731,50 +744,86 @@ export default function MemberProfilePage() {
           <p className="text-[#666666] text-[12px] mt-1">{summaryError.message}</p>
         </div>
       ) : paymentSummary ? (
-        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-3 gap-4 animate-fade z-10 relative">
-          {/* CELL 1 */}
-          <div className="border-r border-[#1C1C1C] pr-4">
-            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Global Due Amount</p>
-            {paymentSummary.totalAmount === 0 ? (
-              <p className="text-white text-[24px] font-black">Free Plan</p>
-            ) : (
-              <p className="text-white text-[24px] font-black">₹{paymentSummary.totalAmount.toLocaleString('en-IN')}</p>
-            )}
-            <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">lifetime ledger across all non-cancelled plans</p>
-          </div>
-          
-          {/* CELL 2 */}
-          <div className="border-r border-[#1C1C1C] px-4">
-            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Total Paid</p>
-            <p className="text-[#10B981] text-[24px] font-black">₹{paymentSummary.totalPaid.toLocaleString('en-IN')}</p>
-            {paymentSummary.totalPaid === 0 ? (
-              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">No payments yet</p>
-            ) : (
-              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">
-                {payments.filter((p: PaymentRecord) => p.amount > 0).length} payment{payments.filter((p: PaymentRecord) => p.amount > 0).length === 1 ? '' : 's'}
-              </p>
-            )}
-          </div>
-          
-          {/* CELL 3 */}
-          <div className="pl-4">
-            <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Global Remaining</p>
-            {paymentSummary.remaining > 0 ? (
-              <p className="text-[#D11F00] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹{paymentSummary.remaining.toLocaleString('en-IN')}</p>
-            ) : paymentSummary.remaining === 0 ? (
-              <p className="text-[#10B981] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹0</p>
-            ) : (
-              <p className="text-[#F59E0B] text-[24px] font-black leading-none pb-1.5 pt-0.5">Overpaid ₹{Math.abs(paymentSummary.remaining).toLocaleString('en-IN')}</p>
-            )}
-            
-            <div className="mt-1">
-              {paymentSummary.isPaidFull ? (
-                <span className="inline-block bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20 text-[11px] px-2 py-0.5 rounded-md font-medium tracking-wide">Fully Paid ✓</span>
+        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 animate-fade z-10 relative">
+          <div className="grid grid-cols-3 gap-4">
+            {/* CELL 1 */}
+            <div className="border-r border-[#1C1C1C] pr-4">
+              <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Global Due Amount</p>
+              {paymentSummary.totalAmount === 0 ? (
+                <p className="text-white text-[24px] font-black">Free Plan</p>
               ) : (
-                <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] border border-[#D11F00]/20 text-[11px] px-2 py-0.5 rounded-md font-medium tracking-wide">₹{paymentSummary.remaining.toLocaleString('en-IN')} pending</span>
+                <p className="text-white text-[24px] font-black">₹{paymentSummary.totalAmount.toLocaleString('en-IN')}</p>
+              )}
+              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">lifetime ledger across all non-cancelled plans</p>
+            </div>
+
+            {/* CELL 2 */}
+            <div className="border-r border-[#1C1C1C] px-4">
+              <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Total Paid</p>
+              <p className="text-[#10B981] text-[24px] font-black">₹{paymentSummary.totalPaid.toLocaleString('en-IN')}</p>
+              {paymentSummary.totalPaid === 0 ? (
+                <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">No payments yet</p>
+              ) : (
+                <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">
+                  {payments.filter((p: PaymentRecord) => p.amount > 0).length} payment{payments.filter((p: PaymentRecord) => p.amount > 0).length === 1 ? '' : 's'}
+                </p>
               )}
             </div>
+
+            {/* CELL 3 */}
+            <div className="pl-4">
+              <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Global Remaining</p>
+              {paymentSummary.remaining > 0 ? (
+                <p className="text-[#D11F00] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹{paymentSummary.remaining.toLocaleString('en-IN')}</p>
+              ) : paymentSummary.remaining === 0 ? (
+                <p className="text-[#10B981] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹0</p>
+              ) : (
+                <p className="text-[#F59E0B] text-[24px] font-black leading-none pb-1.5 pt-0.5">Overpaid ₹{Math.abs(paymentSummary.remaining).toLocaleString('en-IN')}</p>
+              )}
+
+              <div className="mt-1">
+                {paymentSummary.isPaidFull ? (
+                  <span className="inline-block bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20 text-[11px] px-2 py-0.5 rounded-md font-medium tracking-wide">Fully Paid ✓</span>
+                ) : (
+                  <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] border border-[#D11F00]/20 text-[11px] px-2 py-0.5 rounded-md font-medium tracking-wide">₹{paymentSummary.remaining.toLocaleString('en-IN')} pending</span>
+                )}
+              </div>
+            </div>
           </div>
+
+          {/* Current plan strip */}
+          {paymentSummary.currentPlanAmount > 0 && (
+            <div className="mt-4 rounded-xl border border-[#242424] bg-[#0D0D0D] px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[#666666] text-[10px] tracking-widest uppercase font-bold">
+                  Current Plan Summary
+                </p>
+                <p className="text-[#333333] text-[10px] font-mono">
+                  total ₹{Math.round(paymentSummary.currentPlanAmount).toLocaleString("en-IN")}
+                </p>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-[#1C1C1C] bg-[#111111] px-3 py-2">
+                  <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold">Total</p>
+                  <p className="text-white text-[14px] font-black">
+                    ₹{Math.round(paymentSummary.currentPlanAmount).toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[#10B981]/20 bg-[#10B981]/10 px-3 py-2">
+                  <p className="text-[#10B981] text-[10px] tracking-widest uppercase font-bold">Paid</p>
+                  <p className="text-[#10B981] text-[14px] font-black">
+                    ₹{Math.max(0, Math.round(paymentSummary.currentPlanPaid ?? 0)).toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[#D11F00]/20 bg-[#D11F00]/10 px-3 py-2">
+                  <p className="text-[#D11F00] text-[10px] tracking-widest uppercase font-bold">Due</p>
+                  <p className="text-[#D11F00] text-[14px] font-black">
+                    ₹{Math.max(0, Math.round(paymentSummary.currentPlanRemaining ?? 0)).toLocaleString("en-IN")}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 text-center">
@@ -896,55 +945,119 @@ export default function MemberProfilePage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left min-w-[500px]">
-              <thead className="border-b border-[#1C1C1C]">
-                <tr>
-                  <th className="text-[#333333] text-[10px] tracking-widest uppercase px-6 py-4 font-bold">Date</th>
-                  <th className="text-[#333333] text-[10px] tracking-widest uppercase px-6 py-4 font-bold">Amount</th>
-                  <th className="text-[#333333] text-[10px] tracking-widest uppercase px-6 py-4 font-bold">Mode</th>
-                  <th className="text-[#333333] text-[10px] tracking-widest uppercase px-6 py-4 font-bold">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments.filter((p: PaymentRecord) => p.amount > 0).length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-12 text-center text-[#333333] text-[13px] font-medium">
-                      No payments recorded yet
-                    </td>
-                  </tr>
-                ) : (
-                  payments
-                    .filter((p: PaymentRecord) => p.amount > 0)
-                    .map((pay: PaymentRecord) => {
-                      const modeColor = pay.mode === "CASH" ? "bg-[#10B981]/10 text-[#10B981]" : pay.mode === "UPI" ? "bg-[#3B82F6]/10 text-[#3B82F6]" : "bg-[#8B5CF6]/10 text-[#8B5CF6]"
-                      return (
-                        <tr key={pay.id} className="border-b border-[#0D0D0D] hover:bg-[#0D0D0D] transition-colors">
-                          <td className="px-6 py-4 text-white text-[13px] font-medium whitespace-nowrap">
-                            {formatPaymentDate(pay.date)}
-                          </td>
-                          <td className="px-6 py-4 text-white font-bold whitespace-nowrap">
-                            ₹{pay.amount.toLocaleString('en-IN')}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`${modeColor} text-[10px] font-bold px-2.5 py-1 rounded-sm uppercase tracking-wider`}>
-                              {pay.mode}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-[#444444] text-[12px] italic max-w-[200px] truncate">
-                            {pay.notes || "-"}
-                          </td>
-                        </tr>
-                      )
-                    })
-                )}
-              </tbody>
-            </table>
-          </div>
+          {payments.filter((p: PaymentRecord) => p.amount > 0).length === 0 ? (
+            <div className="py-12 text-center text-[#333333] text-[13px] font-medium">
+              No payments recorded yet
+            </div>
+          ) : (
+            <div className="divide-y divide-[#1C1C1C]">
+              {Object.entries(
+                payments
+                  .filter((p: PaymentRecord) => p.amount > 0)
+                  .reduce((acc: Record<string, PaymentRecord[]>, p) => {
+                    const key = p.subscription?.id ?? p.subscriptionId ?? "UNASSIGNED"
+                    acc[key] = acc[key] ?? []
+                    acc[key].push(p)
+                    return acc
+                  }, {})
+              ).map(([key, items]) => {
+                const sub = items[0]?.subscription ?? null
+                const total = items.reduce((s, p) => s + (p.amount || 0), 0)
+                const totalDiscount = items.reduce((s, p) => s + (p.discountAmount || 0), 0)
+                const label =
+                  key === "UNASSIGNED"
+                    ? "Unassigned payments"
+                    : sub?.planNameSnapshot
+                      ? sub.planNameSnapshot
+                      : "Plan"
+
+                const period =
+                  sub?.startDate && sub?.endDate
+                    ? `${formatMemberDate(sub.startDate)} → ${formatMemberDate(sub.endDate)}`
+                    : null
+
+                return (
+                  <div key={key} className="p-5">
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                      <div>
+                        <p className="text-white text-[13px] font-bold">{label}</p>
+                        {period && (
+                          <p className="text-[#444444] text-[11px] mt-0.5">{period}</p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold">
+                          Total Paid
+                        </p>
+                        <p className="text-white text-[14px] font-black">
+                          ₹{total.toLocaleString("en-IN")}
+                        </p>
+                        <p className="text-[#666666] text-[11px] mt-0.5">
+                          Discount ₹{totalDiscount.toLocaleString("en-IN")}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left min-w-[520px]">
+                        <thead className="border-y border-[#1C1C1C] bg-[#0D0D0D]">
+                          <tr>
+                            <th className="text-[#333333] text-[10px] tracking-widest uppercase px-4 py-3 font-bold">Date</th>
+                            <th className="text-[#333333] text-[10px] tracking-widest uppercase px-4 py-3 font-bold">Amount</th>
+                            <th className="text-[#333333] text-[10px] tracking-widest uppercase px-4 py-3 font-bold">Discount</th>
+                            <th className="text-[#333333] text-[10px] tracking-widest uppercase px-4 py-3 font-bold">Mode</th>
+                            <th className="text-[#333333] text-[10px] tracking-widest uppercase px-4 py-3 font-bold">Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {items.map((pay) => {
+                            const modeColor =
+                              pay.mode === "CASH"
+                                ? "bg-[#10B981]/10 text-[#10B981]"
+                                : pay.mode === "UPI"
+                                  ? "bg-[#3B82F6]/10 text-[#3B82F6]"
+                                  : "bg-[#8B5CF6]/10 text-[#8B5CF6]"
+                            return (
+                              <tr key={pay.id} className="border-b border-[#0D0D0D] hover:bg-[#0D0D0D] transition-colors">
+                                <td className="px-4 py-3 text-white text-[13px] font-medium whitespace-nowrap">
+                                  {formatPaymentDate(pay.date)}
+                                </td>
+                                <td className="px-4 py-3 text-white font-bold whitespace-nowrap">
+                                  ₹{pay.amount.toLocaleString("en-IN")}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className="text-[#F59E0B] text-[12px] font-bold">
+                                    ₹{(pay.discountAmount || 0).toLocaleString("en-IN")}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className={`${modeColor} text-[10px] font-bold px-2.5 py-1 rounded-sm uppercase tracking-wider`}>
+                                    {pay.mode}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-[#444444] text-[12px] italic max-w-[240px] truncate">
+                                  {pay.notes || "-"}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {payments.length > 0 && (
             <div className="border-t border-[#1C1C1C] px-6 py-4 flex items-center justify-between bg-[#0A0A0A]">
-              <span className="text-[#444444] font-bold uppercase tracking-wider text-[11px]">Total Paid</span>
+              <div>
+                <span className="text-[#444444] font-bold uppercase tracking-wider text-[11px]">Total Paid</span>
+                <p className="text-[#666666] text-[11px] mt-1">
+                  Discount Applied: ₹{payments.reduce((sum: number, p: PaymentRecord) => sum + (p.discountAmount || 0), 0).toLocaleString("en-IN")}
+                </p>
+              </div>
               <span className="text-white font-black text-[16px]">
                 ₹{payments.reduce((sum: number, p: PaymentRecord) => sum + p.amount, 0).toLocaleString('en-IN')}
               </span>
@@ -976,6 +1089,31 @@ export default function MemberProfilePage() {
               <div className="bg-[#0F0F0F] border border-[#1C1C1C] rounded-lg px-4 py-3 mb-6 h-12 animate-pulse" />
             )}
             
+            {(() => {
+              const due = Math.max(0, Math.round(Number(paymentSummary?.remaining ?? 0)))
+              const entered = Math.round(Number(watchPayment("amount") || 0))
+              const overDue = due > 0 && entered > due
+              const nothingDue = due <= 0
+              return (
+                <>
+                  {nothingDue && (
+                    <div className="bg-[#10B981]/10 border border-[#10B981]/20 rounded-lg px-4 py-3 mb-5">
+                      <p className="text-[#10B981] text-[12px] font-medium">
+                        No due amount pending. You can’t record a payment above ₹0.
+                      </p>
+                    </div>
+                  )}
+                  {overDue && (
+                    <div className="bg-[#D11F00]/10 border border-[#D11F00]/20 rounded-lg px-4 py-3 mb-5">
+                      <p className="text-[#D11F00] text-[12px] font-medium">
+                        Amount cannot exceed due amount (₹{due.toLocaleString("en-IN")}).
+                      </p>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+
             <form onSubmit={handlePaymentSubmit(onPaymentSubmit)} className="space-y-5">
               <div>
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Amount</label>
@@ -988,11 +1126,20 @@ export default function MemberProfilePage() {
                         const value = e.target.value
                         console.log("[Payment Form] Amount changed:", value)
                         const numValue = value === "" ? 0 : Number(value)
-                        setPaymentValue("amount", isNaN(numValue) ? 0 : numValue, { shouldValidate: true })
+                        const due = Math.max(0, Math.round(Number(paymentSummary?.remaining ?? 0)))
+                        const next = isNaN(numValue) ? 0 : Math.max(0, Math.round(numValue))
+                        const clamped = due > 0 ? Math.min(next, due) : 0
+                        setPaymentValue("amount", clamped, { shouldValidate: true })
                       }
                     })}
                     type="number"
+                    min={0}
+                    max={Math.max(0, Math.round(Number(paymentSummary?.remaining ?? 0)))}
                     placeholder="2500"
+                    onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                    }}
                     className={`w-full bg-[#0F0F0F] border ${payErrors.amount ? 'border-[#D11F00]' : 'border-[#242424]'} text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-bold`}
                   />
                 </div>
@@ -1070,7 +1217,13 @@ export default function MemberProfilePage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isPaying || paymentSuccess}
+                  disabled={
+                    isPaying ||
+                    paymentSuccess ||
+                    Math.max(0, Math.round(Number(paymentSummary?.remaining ?? 0))) <= 0 ||
+                    Math.round(Number(watchPayment("amount") || 0)) >
+                      Math.max(0, Math.round(Number(paymentSummary?.remaining ?? 0)))
+                  }
                   className={`flex-[2] text-white font-bold text-[12px] tracking-[0.1em] uppercase py-3 rounded-lg transition-all duration-200 flex items-center justify-center gap-2
                     ${paymentSuccess ? "bg-[#10B981]" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
                     ${(isPaying && !paymentSuccess) ? "opacity-70 cursor-not-allowed" : ""}
@@ -1136,6 +1289,23 @@ export default function MemberProfilePage() {
                     placeholder="e.g. Boxing 10 Sessions"
                     className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg px-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 mb-4"
                   />
+                  <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Plan Amount (₹)</label>
+                  <div className="relative mb-2">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
+                    <input
+                      {...regRenewal("customPrice", { valueAsNumber: true })}
+                      type="number"
+                      min={0}
+                      max={99999}
+                      required
+                      placeholder="Enter plan amount"
+                      onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                      onKeyDown={(e) => {
+                        if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                      }}
+                      className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-bold"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -1180,6 +1350,28 @@ export default function MemberProfilePage() {
               </div>
 
               <div>
+                <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Discount (₹)</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
+                  <input
+                    {...regRenewal("discountAmount", { valueAsNumber: true })}
+                    type="number"
+                    min={0}
+                    max={99999}
+                    placeholder="0"
+                    onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                    }}
+                    className="w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-bold"
+                  />
+                </div>
+                <p className="text-[#444444] text-[10px] mt-1.5 font-medium">
+                  Discount reduces dues without taking payment.
+                </p>
+              </div>
+
+              <div>
                 <label className="text-[#555555] text-[10px] font-bold tracking-[0.15em] uppercase block mb-1.5">Paid Amount (Optional)</label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#555555] font-medium text-[14px]">₹</span>
@@ -1187,6 +1379,10 @@ export default function MemberProfilePage() {
                     {...regRenewal("paidAmount")}
                     type="number"
                     placeholder="Enter amount paid today"
+                    onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                    }}
                     className="w-full bg-[#0F0F0F] border border-[#242424] text-[#10B981] text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981]/20 focus:outline-none transition-all duration-200 font-bold"
                   />
                 </div>
@@ -1311,6 +1507,10 @@ export default function MemberProfilePage() {
                         type="number"
                         placeholder="5000"
                         disabled={paymentSummary && paymentSummary.totalPaid > 0}
+                        onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                        onKeyDown={(e) => {
+                          if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault()
+                        }}
                         className={`w-full bg-[#0F0F0F] border border-[#242424] text-white text-[14px] rounded-lg pl-9 pr-4 py-3 focus:border-[#D11F00] focus:ring-1 focus:ring-[#D11F00]/20 focus:outline-none transition-all duration-200 font-medium
                           ${paymentSummary && paymentSummary.totalPaid > 0 ? "opacity-50 cursor-not-allowed" : ""}
                         `}
