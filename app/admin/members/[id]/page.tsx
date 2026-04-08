@@ -72,7 +72,7 @@ interface RenewalFormData {
 
 
 interface RenewalPayload {
-  action: string
+  action: "renew"
   membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   startDate: string
   endDate?: string
@@ -170,11 +170,8 @@ export default function MemberProfilePage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showRenewalModal, setShowRenewalModal] = useState(false)
-  const [renewalAction, setRenewalAction] = useState<"renew" | "switch">("renew")
   const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [showCancelModal, setShowCancelModal] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [cancelLoading, setCancelLoading] = useState(false)
   const [renewLoading, setRenewLoading] = useState(false)
 
   const [renewError, setRenewError] = useState("")
@@ -223,32 +220,6 @@ export default function MemberProfilePage() {
       console.error(e)
     } finally {
       setDeleteLoading(false)
-    }
-  }
-
-  // Cancel Handler
-  const handleCancelSubscription = async () => {
-    setCancelLoading(true)
-    try {
-      const res = await fetch(`/api/members/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "cancel" })
-      })
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ["member", id] })
-        queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
-        queryClient.invalidateQueries({ queryKey: ["members"] })
-        setShowCancelModal(false)
-      } else {
-        const err = await res.json()
-        alert(err.error || "Failed to cancel subscription")
-      }
-    } catch (e) {
-      console.error(e)
-      alert("Network error")
-    } finally {
-      setCancelLoading(false)
     }
   }
 
@@ -456,11 +427,11 @@ export default function MemberProfilePage() {
           member.membershipType && member.membershipType !== "NONE" ? member.membershipType : "MONTHLY",
         startDate: isAddPlanMode
           ? getTodayStr()
-          : (renewalAction === "switch" ? toYmd(member.startDate) : toYmd(member.endDate)),
+          : toYmd(member.endDate),
         customPrice: undefined,
       })
     }
-  }, [member, showRenewalModal, renewalAction, resetRenewal])
+  }, [member, showRenewalModal, resetRenewal])
 
   const onRenewalSubmit = async (data: RenewalFormData) => {
     try {
@@ -482,7 +453,7 @@ export default function MemberProfilePage() {
       }
 
       const payload: RenewalPayload = {
-        action: isAddPlanMode ? "renew" : renewalAction,
+        action: "renew",
         membershipType: data.membershipType,
         startDate: data.startDate,
         customPrice: data.customPrice ? Number(data.customPrice) : undefined,
@@ -607,14 +578,6 @@ export default function MemberProfilePage() {
           <span>←</span> Members
         </button>
         <div className="flex gap-2 items-center">
-          {isLivePlan && (
-            <button
-              onClick={() => setShowCancelModal(true)}
-              className="bg-transparent border border-[#D11F00]/30 text-[#D11F00] hover:bg-[#D11F00]/10 text-[12px] font-bold tracking-widest uppercase px-5 py-2.5 rounded-lg transition-all cursor-pointer"
-            >
-              Cancel Sub
-            </button>
-          )}
           <button
             onClick={() => setShowEditModal(true)}
             className="bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] text-[12px] font-bold tracking-widest uppercase px-5 py-2.5 rounded-lg transition-all cursor-pointer"
@@ -648,28 +611,16 @@ export default function MemberProfilePage() {
               {isDeletedMember
                 ? "Add a new plan to restore this member back to ACTIVE."
                 : isCancelledPlan
-                ? "Use Switch Plan to upgrade or change — previous payments count toward the global balance."
+                ? "Use Add Plan to assign a new plan — previous payments count toward the global balance."
                 : isExpiredPlan && endInfo.isPastEnd
                   ? `Expired on ${formatMemberDate(member.endDate)}`
                   : "Member needs a plan assignment to record attendance."}
             </p>
           </div>
           <div className="flex gap-2">
-            {isCancelledPlan && (
-              <button
-                onClick={() => {
-                  setRenewalAction("switch")
-                  setShowRenewalModal(true)
-                }}
-                className="bg-[#F59E0B] hover:bg-[#D97706] text-black font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
-              >
-                Switch Plan
-              </button>
-            )}
             {shouldShowRenew && (
               <button
                 onClick={() => {
-                  setRenewalAction("renew")
                   setShowRenewalModal(true)
                 }}
                 className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
@@ -680,7 +631,6 @@ export default function MemberProfilePage() {
             {!shouldShowRenew && !isCancelledPlan && (
               <button
                 onClick={() => {
-                  setRenewalAction("renew")
                   setShowRenewalModal(true)
                 }}
                 className="bg-[#10B981] hover:bg-[#059669] text-white font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98] cursor-pointer"
@@ -1154,7 +1104,7 @@ export default function MemberProfilePage() {
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setShowRenewalModal(false)} />
           <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[440px] w-full relative z-10 animate-modal shadow-2xl shadow-black/50 overflow-y-auto max-h-[90vh]">
             <h2 className="text-white text-[20px] font-black tracking-tight">
-              {isAddPlanMode ? "Add Plan" : renewalAction === "switch" ? "Switch Plan" : "Renew Membership"}
+              {isAddPlanMode ? "Add Plan" : "Renew Membership"}
             </h2>
             <p className="text-[#666666] text-[13px] mt-1 mb-6">{member.name}</p>
             
@@ -1195,8 +1145,6 @@ export default function MemberProfilePage() {
                   <span className="text-[#10B981] ml-1 font-normal normal-case">
                     {isAddPlanMode
                       ? "(starts today)"
-                      : renewalAction === "switch"
-                      ? "(Server uses original start of cancelled plan)"
                       : "(≤28 days after last expiry → aligns to that date; else today)"}
                   </span>
                 </label>
@@ -1274,7 +1222,7 @@ export default function MemberProfilePage() {
                     ${(isRenewing && !renewalSuccess) ? "opacity-70 cursor-not-allowed" : ""}
                   `}
                 >
-                  {renewalSuccess ? (renewalAction === "switch" ? "Switched ✓" : "Renewed ✓") : (renewalAction === "switch" ? "Switch" : "Renew")}
+                  {renewalSuccess ? "Renewed ✓" : "Renew"}
                 </button>
               </div>
             </form>
@@ -1452,44 +1400,6 @@ export default function MemberProfilePage() {
                 `}
               >
                 {deleteLoading ? "Deleting..." : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CANCEL SUBSCRIPTION MODAL */}
-      {showCancelModal && member && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setShowCancelModal(false)} />
-          <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 max-w-[400px] w-full relative z-10 animate-modal shadow-2xl shadow-black/50">
-            <h2 className="text-white text-[18px] font-black tracking-tight">Cancel Subscription</h2>
-            
-            <p className="text-[#444444] text-[13px] mt-3">
-              Are you sure you want to cancel <span className="font-bold text-white">{member.name}&apos;s</span> current active plan?
-            </p>
-
-            <div className="bg-[#F59E0B]/10 border border-[#F59E0B]/20 rounded-lg px-4 py-3 mt-4">
-              <p className="text-[#F59E0B] text-[12px]">
-                This will instantly remove the remaining debt for this plan from the member&apos;s balance. Use this if the member is switching plans mid-cycle.
-              </p>
-            </div>
-
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={() => setShowCancelModal(false)}
-                className="flex-1 bg-transparent border border-[#242424] text-[#444444] hover:text-white hover:border-[#444444] font-bold text-[12px] tracking-widest uppercase px-6 py-3 rounded-lg transition-all duration-200 cursor-pointer"
-              >
-                Close
-              </button>
-              <button
-                onClick={handleCancelSubscription}
-                disabled={cancelLoading}
-                className={`flex-1 text-white font-black text-[12px] tracking-widest uppercase px-6 py-3 rounded-lg transition-all duration-200 flex items-center justify-center
-                  ${cancelLoading ? "bg-[#D11F00] opacity-70 cursor-not-allowed" : "bg-[#D11F00] hover:bg-[#B51A00] active:scale-[0.98] cursor-pointer"}
-                `}
-              >
-                {cancelLoading ? "Processing..." : "Confirm Cancel"}
               </button>
             </div>
           </div>

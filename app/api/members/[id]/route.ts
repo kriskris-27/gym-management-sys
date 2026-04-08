@@ -9,9 +9,8 @@ import {
 } from "@/domain/member-status"
 import { computeMemberFinancials, emptyMemberFinancials } from "@/lib/financial-service"
 import {
-  cancelMemberPlan,
   MemberLifecycleError,
-  renewOrSwitchMemberPlan,
+  renewMemberPlan,
   restoreMember,
   softDeleteMember,
 } from "@/domain/member-lifecycle"
@@ -425,8 +424,8 @@ export async function PATCH(
       return NextResponse.json({ member: restored })
     }
 
-    // CASE 2: Renewal / Switch
-    if (action === "renew" || action === "switch") {
+    // CASE 2: Renewal
+    if (action === "renew") {
       const { RenewMemberSchema } = await import("@/lib/validations")
       const validated = RenewMemberSchema.safeParse(body)
       if (!validated.success) {
@@ -438,8 +437,8 @@ export async function PATCH(
           { status: 400 }
         )
       }
-      const res = await renewOrSwitchMemberPlan(id, {
-        action: action as "renew" | "switch",
+      const res = await renewMemberPlan(id, {
+        action: "renew",
         membershipType: validated.data.membershipType,
         startDate: validated.data.startDate,
         endDate: validated.data.endDate,
@@ -449,12 +448,6 @@ export async function PATCH(
         paymentMode: validated.data.paymentMode,
       })
       return NextResponse.json(res)
-    }
-
-    // CASE 3: Cancel Active Subscription (To allow Plan Switching)
-    if (action === "cancel") {
-      const result = await cancelMemberPlan(id)
-      return NextResponse.json(result)
     }
 
     return NextResponse.json(

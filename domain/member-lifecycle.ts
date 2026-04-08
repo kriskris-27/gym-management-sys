@@ -10,7 +10,7 @@ import type { DateTime } from "luxon"
 import { fromDate, nowUTC } from "@/lib/utils"
 
 type Tx = Prisma.TransactionClient
-type MemberAction = "renew" | "switch"
+type MemberAction = "renew"
 
 export class MemberLifecycleError extends Error {
   readonly status: number
@@ -24,7 +24,7 @@ export class MemberLifecycleError extends Error {
   }
 }
 
-type RenewSwitchPayload = {
+type RenewPayload = {
   action: MemberAction
   membershipType?: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   /** Optional explicit subscription start (ISO date string). Overrides computed anchor when valid. */
@@ -88,67 +88,15 @@ export async function softDeleteMember(memberId: string) {
   return { success: true as const }
 }
 
-export async function cancelMemberPlan(memberId: string) {
-  const activeSub = await findLiveSubscription(memberId)
-  if (!activeSub) {
-    throw new MemberLifecycleError(400, "No active subscription to cancel", "NO_ACTIVE_SUBSCRIPTION")
-  }
-
-  await prisma.subscription.update({
-    where: { id: activeSub.id },
-    data: { status: "CANCELLED" },
-  })
-  await syncMemberOperationalStatus(memberId)
-
-  await prisma.auditLog.create({
-    data: {
-      entityType: "MEMBER",
-      entityId: memberId,
-      action: "CANCELLED",
-      before: { plan: activeSub.planNameSnapshot, id: activeSub.id },
-    },
-  })
-
-  return { success: true, message: "Subscription cancelled successfully" }
-}
-
 async function validateActionPreconditions(memberId: string, action: MemberAction) {
-  const latestForAction = await prisma.subscription.findFirst({
-    where: { memberId },
-    orderBy: { createdAt: "desc" },
-  })
   const hasLivePlan = !!(await findLiveSubscription(memberId))
 
   if (action === "renew") {
-    if (latestForAction?.status === "CANCELLED") {
-      throw new MemberLifecycleError(
-        400,
-        "Member has a cancelled plan. Use Switch Plan instead of Renew.",
-        "RENEW_USE_SWITCH"
-      )
-    }
     if (hasLivePlan) {
       throw new MemberLifecycleError(
         400,
         "Member already has an active subscription. Cancel first if you need to change plans.",
         "ALREADY_HAS_LIVE_PLAN"
-      )
-    }
-  }
-
-  if (action === "switch") {
-    const cancelledCheck = await prisma.subscription.findFirst({
-      where: { memberId, status: "CANCELLED" },
-      orderBy: { createdAt: "desc" },
-    })
-    if (!cancelledCheck) {
-      throw new MemberLifecycleError(400, "No cancelled plan to switch from.", "NO_CANCELLED_PLAN")
-    }
-    if (hasLivePlan) {
-      throw new MemberLifecycleError(
-        400,
-        "Member still has an active subscription period. Cancel it before switching.",
-        "STILL_HAS_LIVE_WINDOW"
       )
     }
   }
@@ -165,7 +113,7 @@ async function applyRenewOutstandingGuard(tx: Tx, memberId: string) {
   }
 }
 
-export async function renewOrSwitchMemberPlan(memberId: string, payload: RenewSwitchPayload) {
+export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
   await expireStaleActiveSubscriptionsForMember(memberId)
 
   await validateActionPreconditions(memberId, payload.action)
@@ -212,12 +160,6 @@ export async function renewOrSwitchMemberPlan(memberId: string, payload: RenewSw
         const gapDays = Math.max(0, Math.floor(todayDay.diff(expiryDay, "days").days))
         resolvedStartDate = gapDays <= 28 ? fromDate(expiredSub.endDate) : nowIST
       }
-    } else {
-      const cancelledSub = await tx.subscription.findFirst({
-        where: { memberId, status: "CANCELLED" },
-        orderBy: { createdAt: "desc" },
-      })
-      if (cancelledSub) resolvedStartDate = fromDate(cancelledSub.startDate)
     }
 
     if (payload.startDate) {
@@ -288,7 +230,7 @@ export async function renewOrSwitchMemberPlan(memberId: string, payload: RenewSw
       data: {
         entityType: "MEMBER",
         entityId: memberId,
-        action: payload.action === "switch" ? "SWITCHED" : "RENEWED",
+        action: "RENEWED",
         after: { plan: resolvedPlanName, startDate: resolvedStartDate.toISO(), amount: resolvedBasePrice },
       },
     })

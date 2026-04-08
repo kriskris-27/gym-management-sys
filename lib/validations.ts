@@ -191,15 +191,15 @@ export const PricingUpdateSchema = z.object({
     .max(5, "Maximum 5 plans allowed")
 }).strict();
 /**
- * Member Renewal & Switch
+ * Member Renewal
  */
 export const RenewMemberSchema = z.object({
-  action: z.enum(["renew", "switch"]),
+  action: z.literal("renew"),
   membershipType: z.enum([
     "MONTHLY", "QUARTERLY", "HALF_YEARLY",
     "ANNUAL", "OTHERS"
   ]).optional(),
-  /** ISO date string — optional explicit subscription start (renew/switch). */
+  /** ISO date string — optional explicit subscription start. */
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   customPrice: z.coerce.number()
@@ -229,9 +229,3 @@ export const RestoreMemberSchema = z.object({
   action: z.literal("restore")
 }).strict();
 
-/**
- * Member Cancel Subscription
- */
-export const CancelSubscriptionSchema = z.object({
-  action: z.literal("cancel")
-}).strict();
