@@ -28,6 +28,8 @@ interface Member {
   subscriptionStatus?: string
   planUiState?: "LIVE" | "CANCELLED" | "EXPIRED" | "NEEDS_PLAN"
   futurePlansCount?: number
+  /** EXPIRED sub but end date not past IST — e.g. after delete + restore */
+  canReopenLastPlan?: boolean
   createdAt: string
 }
 
@@ -184,6 +186,8 @@ export default function MemberProfilePage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [renewLoading, setRenewLoading] = useState(false)
+  const [reopenLoading, setReopenLoading] = useState(false)
+  const [reopenError, setReopenError] = useState("")
 
   const [renewError, setRenewError] = useState("")
   const [deleteLoading, setDeleteLoading] = useState(false)
@@ -231,6 +235,34 @@ export default function MemberProfilePage() {
       console.error(e)
     } finally {
       setDeleteLoading(false)
+    }
+  }
+
+  const handleReopenLastPlan = async () => {
+    setReopenError("")
+    setReopenLoading(true)
+    try {
+      const res = await fetch(`/api/members/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reopen_last_plan" }),
+      })
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ["member", id] })
+        queryClient.invalidateQueries({ queryKey: ["members"] })
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+        queryClient.invalidateQueries({ queryKey: ["payments"] })
+        queryClient.invalidateQueries({ queryKey: ["payments", "summary", id] })
+        queryClient.refetchQueries({ queryKey: ["member", id] })
+      } else {
+        const err = await res.json().catch(() => null)
+        setReopenError(err?.error || "Could not reopen plan")
+      }
+    } catch (e) {
+      console.error(e)
+      setReopenError("Network error. Please try again.")
+    } finally {
+      setReopenLoading(false)
     }
   }
 
@@ -563,6 +595,11 @@ export default function MemberProfilePage() {
   const isDeletedMember = member.status === "DELETED"
   const isAddPlanMode = isDeletedMember || needsPlan
   const shouldShowRenew = !isDeletedMember && isExpiredPlan && endInfo.isPastEnd
+  const showReopenLastPlan =
+    !isDeletedMember &&
+    !isLivePlan &&
+    !isCancelledPlan &&
+    member.canReopenLastPlan === true
 
   const initial = member.name?.charAt(0).toUpperCase() || "?"
 
@@ -627,8 +664,16 @@ export default function MemberProfilePage() {
                   ? `Expired on ${formatMemberDate(member.endDate)}`
                   : "Member needs a plan assignment to record attendance."}
             </p>
+            {showReopenLastPlan && (
+              <p className="text-[#666666] text-[11px] mt-2 leading-snug">
+                The latest plan is marked expired but the end date (IST) hasn&apos;t passed yet — e.g. after a delete/restore. Reopen it or add a new plan.
+              </p>
+            )}
+            {reopenError && (
+              <p className="text-[#D11F00] text-[11px] mt-2 font-medium">{reopenError}</p>
+            )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
             {shouldShowRenew && (
               <button
                 onClick={() => {
@@ -640,14 +685,26 @@ export default function MemberProfilePage() {
               </button>
             )}
             {!shouldShowRenew && !isCancelledPlan && (
-              <button
-                onClick={() => {
-                  setShowRenewalModal(true)
-                }}
-                className="themeFancyBtn cursor-pointer"
-              >
-                <span>Add Plan</span>
-              </button>
+              <>
+                {showReopenLastPlan && (
+                  <button
+                    type="button"
+                    onClick={handleReopenLastPlan}
+                    disabled={reopenLoading}
+                    className="bg-transparent border border-[#F59E0B]/50 text-[#F59E0B] hover:bg-[#F59E0B]/10 font-bold text-[12px] uppercase tracking-wider px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {reopenLoading ? "Reopening…" : "Reopen last plan"}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setShowRenewalModal(true)
+                  }}
+                  className="themeFancyBtn cursor-pointer"
+                >
+                  <span>Add Plan</span>
+                </button>
+              </>
             )}
           </div>
         </div>

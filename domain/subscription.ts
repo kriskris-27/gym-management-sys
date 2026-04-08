@@ -148,6 +148,18 @@ export async function expireStaleActiveSubscriptionsForMember(
   return ids.length
 }
 
+/**
+ * Lazy cleanup for one member: mark ACTIVE subs past IST end as EXPIRED, then sync Member ACTIVE/INACTIVE.
+ * Use on member-scoped API paths / kiosk scan so the DB stays accurate without relying on a global cron.
+ */
+export async function lazyExpireStaleSubscriptionsAndSyncMember(
+  memberId: string,
+  db: DbClient = prisma
+): Promise<void> {
+  await expireStaleActiveSubscriptionsForMember(memberId, db)
+  await syncMemberOperationalStatus(memberId, db)
+}
+
 export async function getActiveSubscription(memberId: string): Promise<Subscription | null> {
   console.log(`[Subscription Domain] Getting active subscription for member: ${memberId}`)
 

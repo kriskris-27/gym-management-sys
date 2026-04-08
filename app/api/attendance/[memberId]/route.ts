@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { formatDuration } from "@/lib/utils"
+import { lazyExpireStaleSubscriptionsAndSyncMember } from "@/domain/subscription"
 
 /**
  * GET: Returns full attendance history for one member
@@ -33,6 +34,15 @@ export async function GET(
       Math.max(1, parseInt(searchParams.get("limit") || "20"))
     )
     const skip = (page - 1) * limit
+
+    try {
+      await lazyExpireStaleSubscriptionsAndSyncMember(memberId)
+    } catch (lazyErr) {
+      console.error(
+        `[GET /api/attendance/[memberId]] lazyExpireStaleSubscriptionsAndSyncMember failed for ${memberId}`,
+        lazyErr
+      )
+    }
 
     // 1. Verify Member Exists & Not Deleted
     const member = await prisma.member.findUnique({

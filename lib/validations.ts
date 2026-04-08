@@ -285,3 +285,10 @@ export const RestoreMemberSchema = z.object({
   action: z.literal("restore")
 }).strict();
 
+/**
+ * Reopen last plan — latest subscription by createdAt must be EXPIRED with end date not past (IST).
+ */
+export const ReopenLastPlanSchema = z.object({
+  action: z.literal("reopen_last_plan"),
+}).strict();
+

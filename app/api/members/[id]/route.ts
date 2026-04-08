@@ -2,7 +2,10 @@ import { NextResponse } from "next/server"
 import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { MemberUpdateSchema } from "@/lib/validations"
-import { syncMemberOperationalStatus } from "@/domain/subscription"
+import {
+  lazyExpireStaleSubscriptionsAndSyncMember,
+  syncMemberOperationalStatus,
+} from "@/domain/subscription"
 import {
   deriveMemberPlanState,
   type MemberPlanStateSnapshot,
@@ -10,7 +13,9 @@ import {
 import { computeMemberFinancials, emptyMemberFinancials } from "@/lib/financial-service"
 import {
   MemberLifecycleError,
+  getCanReopenLastPlan,
   renewMemberPlan,
+  reopenLastExpiredPlanIfEligible,
   restoreMember,
   softDeleteMember,
 } from "@/domain/member-lifecycle"
@@ -34,7 +39,8 @@ const memberDetailPlanStateFallback: MemberPlanStateSnapshot = {
 }
 
 /**
- * GET: Retrieve single member with attendance stats (read-only; no operational status sync).
+ * GET: Retrieve single member with attendance stats.
+ * Runs lazy subscription expiry + operational status sync so stale ACTIVE rows and Member.status stay accurate.
  * Guards: Excludes DELETED members
  */
 export async function GET(
@@ -46,6 +52,12 @@ export async function GET(
 
   try {
     const { id } = await params
+
+    try {
+      await lazyExpireStaleSubscriptionsAndSyncMember(id)
+    } catch (lazyErr) {
+      console.error(`❌ Member GET: lazyExpireStaleSubscriptionsAndSyncMember failed for ${id}`, lazyErr)
+    }
 
     const member = await prisma.member.findUnique({
       where: { id },
@@ -104,6 +116,13 @@ export async function GET(
       },
     })
 
+    let canReopenLastPlan = false
+    try {
+      canReopenLastPlan = await getCanReopenLastPlan(id)
+    } catch (e) {
+      console.error(`❌ Member GET: getCanReopenLastPlan failed for ${id}`, e)
+    }
+
     return NextResponse.json({
       member: {
         ...memberData,
@@ -116,6 +135,7 @@ export async function GET(
         attendanceCount: _count.sessions,
         lastVisited: sessions[0]?.checkIn || null,
         futurePlansCount,
+        canReopenLastPlan,
       },
     })
   } catch (error) {
@@ -431,6 +451,22 @@ export async function PATCH(
       }
       const restored = await restoreMember(id)
       return NextResponse.json({ member: restored })
+    }
+
+    if (action === "reopen_last_plan") {
+      const { ReopenLastPlanSchema } = await import("@/lib/validations")
+      const validated = ReopenLastPlanSchema.safeParse(body)
+      if (!validated.success) {
+        return NextResponse.json(
+          {
+            error: validated.error.issues[0]?.message ?? "Invalid request",
+            code: "VALIDATION",
+          },
+          { status: 400 }
+        )
+      }
+      const res = await reopenLastExpiredPlanIfEligible(id)
+      return NextResponse.json(res)
     }
 
     // CASE 2: Renewal

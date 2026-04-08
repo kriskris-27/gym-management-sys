@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireAuthUser } from "@/lib/api-auth"
 import { prisma } from "@/lib/prisma"
 import { computeMemberFinancials } from "@/lib/financial-service"
+import { lazyExpireStaleSubscriptionsAndSyncMember } from "@/domain/subscription"
 
 export async function GET(
   request: Request,
@@ -17,6 +18,15 @@ export async function GET(
     if (!memberId || typeof memberId !== "string" || memberId.trim() === "") {
       console.log(`[Payment Summary API] Invalid member ID: ${memberId}`)
       return NextResponse.json({ error: "Invalid member ID" }, { status: 400 })
+    }
+
+    try {
+      await lazyExpireStaleSubscriptionsAndSyncMember(memberId)
+    } catch (lazyErr) {
+      console.error(
+        `[Payment Summary API] lazyExpireStaleSubscriptionsAndSyncMember failed for ${memberId}`,
+        lazyErr
+      )
     }
 
     // Get member info (only fields that exist)

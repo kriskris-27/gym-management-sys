@@ -8,7 +8,7 @@ import {
 } from "./subscription"
 import type { DateTime } from "luxon"
 import { fromDate, nowUTC } from "@/lib/utils"
-import { GYM_TIMEZONE, gymNow } from "@/lib/gym-datetime"
+import { GYM_TIMEZONE, gymNow, isMembershipEndPast } from "@/lib/gym-datetime"
 
 type Tx = Prisma.TransactionClient
 type MemberAction = "renew"
@@ -88,6 +88,130 @@ export async function softDeleteMember(memberId: string) {
 
   await syncMemberOperationalStatus(memberId)
   return { success: true as const }
+}
+
+/**
+ * Resolve whether the **latest** subscription (by `createdAt`) can be reopened:
+ * it must be `EXPIRED`, end date not past in IST, and there must be no `ACTIVE` row.
+ * Matches the common delete→restore case (soft-delete flips ACTIVE → EXPIRED on the newest sub).
+ * Does not reopen an older EXPIRED row when a newer `CANCELLED` or other row exists.
+ */
+export async function getCanReopenLastPlan(memberId: string): Promise<boolean> {
+  await expireStaleActiveSubscriptionsForMember(memberId)
+
+  const member = await prisma.member.findUnique({
+    where: { id: memberId },
+    select: { status: true },
+  })
+  if (!member || member.status === "DELETED") return false
+
+  const activeRows = await prisma.subscription.count({
+    where: { memberId, status: "ACTIVE" },
+  })
+  if (activeRows > 0) return false
+
+  const latest = await prisma.subscription.findFirst({
+    where: { memberId },
+    orderBy: { createdAt: "desc" },
+    select: { status: true, endDate: true },
+  })
+  if (!latest || latest.status !== "EXPIRED") return false
+  if (isMembershipEndPast(latest.endDate)) return false
+  return true
+}
+
+/**
+ * Reopens the **latest** subscription only: must be `EXPIRED` with end date still in IST.
+ * Runs stale-active cleanup first (same as renew) so phantom ACTIVE rows do not block incorrectly.
+ */
+export async function reopenLastExpiredPlanIfEligible(memberId: string) {
+  await expireStaleActiveSubscriptionsForMember(memberId)
+
+  const member = await prisma.member.findUnique({ where: { id: memberId } })
+  if (!member) throw new MemberLifecycleError(404, "Member not found", "NOT_FOUND")
+  if (member.status === "DELETED") {
+    throw new MemberLifecycleError(
+      400,
+      "Restore the member before reopening a plan.",
+      "MEMBER_DELETED"
+    )
+  }
+
+  const activeRows = await prisma.subscription.count({
+    where: { memberId, status: "ACTIVE" },
+  })
+  if (activeRows > 0) {
+    throw new MemberLifecycleError(
+      400,
+      "Member already has an active subscription on file.",
+      "ACTIVE_SUBSCRIPTION_EXISTS"
+    )
+  }
+
+  const target = await prisma.subscription.findFirst({
+    where: { memberId },
+    orderBy: { createdAt: "desc" },
+  })
+  if (!target) {
+    throw new MemberLifecycleError(
+      400,
+      "No subscription on file to reopen.",
+      "NO_REOPENABLE_PLAN"
+    )
+  }
+  if (target.status === "CANCELLED") {
+    throw new MemberLifecycleError(
+      400,
+      "Latest plan is cancelled. Use Add Plan instead of reopen.",
+      "LATEST_PLAN_CANCELLED"
+    )
+  }
+  if (target.status !== "EXPIRED") {
+    throw new MemberLifecycleError(
+      400,
+      "Latest subscription is not in an expired state that can be reopened.",
+      "LATEST_NOT_REOPENABLE"
+    )
+  }
+  if (isMembershipEndPast(target.endDate)) {
+    throw new MemberLifecycleError(
+      400,
+      "No previous plan can be reopened — the membership period has ended.",
+      "NO_REOPENABLE_PLAN"
+    )
+  }
+
+  const beforeSnapshot = {
+    subscriptionId: target.id,
+    status: target.status,
+    plan: target.planNameSnapshot,
+    endDate: target.endDate.toISOString(),
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.subscription.update({
+      where: { id: target.id },
+      data: { status: "ACTIVE" },
+    })
+    await tx.auditLog.create({
+      data: {
+        entityType: "MEMBER",
+        entityId: memberId,
+        action: "PLAN_REOPENED",
+        before: beforeSnapshot,
+        after: {
+          subscriptionId: target.id,
+          status: "ACTIVE",
+          plan: target.planNameSnapshot,
+          endDate: target.endDate.toISOString(),
+        },
+      },
+    })
+  })
+
+  await syncMemberOperationalStatus(memberId)
+  const updated = await prisma.subscription.findUnique({ where: { id: target.id } })
+  return { success: true as const, subscription: updated }
 }
 
 async function validateActionPreconditions(memberId: string, action: MemberAction) {

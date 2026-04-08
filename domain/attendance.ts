@@ -8,6 +8,7 @@ import {
   isMembershipEndPast,
   isMembershipStartInFutureIST,
 } from "../lib/gym-datetime"
+import { lazyExpireStaleSubscriptionsAndSyncMember } from "./subscription"
 
 // Type for Prisma transaction - inferred from prisma instance
 type PrismaTransaction = Parameters<typeof prisma.$transaction>[0] extends (tx: infer T) => any ? T : never
@@ -71,19 +72,32 @@ export async function scanMember(
   nowJS: Date = new Date()
 ): Promise<ScanResult> {
   const now = fromDate(nowJS)
+  const phoneNormalized = phone.replace(/\D/g, "")
   console.log(`[Attendance Domain] Scanning member with phone: ${phone} at ${now.toISO()}`)
 
-  
+  const memberPreview = await prisma.member.findUnique({
+    where: { phoneNormalized },
+    select: { id: true, status: true },
+  })
+
+  if (!memberPreview || memberPreview.status === "DELETED") {
+    await new Promise((r) => setTimeout(r, 400))
+    return {
+      state: "NOT_FOUND" as const,
+      message: "Phone not registered.",
+    }
+  }
+
+  await lazyExpireStaleSubscriptionsAndSyncMember(memberPreview.id)
+
   return await prisma.$transaction(async (tx: PrismaTransaction): Promise<ScanResult> => {
-    // Step 1: Get member with status check
-    const member = await tx.member.findUnique({ where: { phoneNormalized: phone.replace(/\D/g, '') } })
-    
-    // Status check order (strict)
+    const member = await tx.member.findUnique({ where: { id: memberPreview.id } })
+
     if (!member || member.status === "DELETED") {
-      await new Promise(r => setTimeout(r, 400)) // Prevent enumeration
+      await new Promise((r) => setTimeout(r, 400))
       return {
         state: "NOT_FOUND" as const,
-        message: "Phone not registered."
+        message: "Phone not registered.",
       }
     }
 

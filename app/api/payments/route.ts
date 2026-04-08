@@ -11,6 +11,7 @@ import {
   computeGlobalMemberLedger,
   getLivePlanPaymentRemaining,
 } from "@/domain/payment"
+import { lazyExpireStaleSubscriptionsAndSyncMember } from "@/domain/subscription"
 
 /**
  * GET: Retrieve payments list with optional filtering
@@ -158,6 +159,15 @@ export async function POST(request: Request) {
 
     if (!member || member.status === "DELETED") {
       return NextResponse.json({ error: "Member not found" }, { status: 404 })
+    }
+
+    try {
+      await lazyExpireStaleSubscriptionsAndSyncMember(data.memberId)
+    } catch (lazyErr) {
+      console.error(
+        `[POST /api/payments] lazyExpireStaleSubscriptionsAndSyncMember failed for ${data.memberId}`,
+        lazyErr
+      )
     }
 
     const globalLedger = await computeGlobalMemberLedger(data.memberId)
