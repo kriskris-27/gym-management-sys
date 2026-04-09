@@ -31,10 +31,14 @@ export async function GET() {
       ]
     })
     
-  } catch (error) {
-    return NextResponse.json({ 
-      error: "Test failed",
-      details: error.message 
-    }, { status: 500 })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    return NextResponse.json(
+      {
+        error: "Test failed",
+        details: message,
+      },
+      { status: 500 }
+    )
   }
 }

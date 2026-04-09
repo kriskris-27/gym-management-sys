@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useForm } from "react-hook-form"
+import { useForm, type Resolver, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useCreateMember } from "@/hooks/useCreateMember"
@@ -49,23 +49,11 @@ const schema = z.object({
   path: ["manualAmount"]
 })
 
+type FormData = z.output<typeof schema>
+
 interface PricingPlan {
   membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
   amount: number
-}
-
-interface FormData {
-  name: string
-  phone: string
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
-  discountAmount: number
-  paidAmount: number
-  paymentMode: "CASH" | "UPI" | "CARD"
-  includeAdmission?: boolean
-  startDate: string
-  endDate?: string
-  manualPlanName?: string
-  manualAmount?: number
 }
 
 export default function AddMemberPage() {
@@ -74,7 +62,7 @@ export default function AddMemberPage() {
   const [success, setSuccess] = useState(false)
   const [generalError, setGeneralError] = useState("")
 
-  const [priceLoading, setPriceLoading] = useState(false)
+  const [, setPriceLoading] = useState(false)
   const [plans, setPlans] = useState<PricingPlan[]>([])
   const [basePrice, setBasePrice] = useState(0)
   const [admissionFee, setAdmissionFee] = useState(0)
@@ -112,7 +100,7 @@ export default function AddMemberPage() {
     setError,
     formState: { errors }
   } = useForm<FormData>({
-    resolver: zodResolver(schema as any),
+    resolver: zodResolver(schema) as Resolver<FormData>,
     defaultValues: {
       membershipType: "MONTHLY",
       discountAmount: 0,
@@ -183,7 +171,7 @@ export default function AddMemberPage() {
     }
   }, [startDate, membershipType, setValue])
 
-  const onSubmit = async (data: FormData) => {
+  const onSubmit: SubmitHandler<FormData> = async (data) => {
     setGeneralError("")
 
     try {
@@ -253,7 +241,7 @@ export default function AddMemberPage() {
 
       {/* FORM CARD */}
       <div className="bg-[#111111] border border-[#1C1C1C] rounded-xl p-8 w-full max-w-[560px] animate-fadeUp opacity-0 [animation-delay:0.1s]">
-        <form onSubmit={handleSubmit(onSubmit as any)} className="space-y-6">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           
           {/* FIELD 1: Full Name */}
           <div>

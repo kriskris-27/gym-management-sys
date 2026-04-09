@@ -1,20 +1,16 @@
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { PrismaClient } = require("@prisma/client") as any
-
+import { PrismaClient } from "@prisma/client"
 import bcrypt from "bcryptjs"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const prisma = new (PrismaClient as any)()
+const prisma = new PrismaClient()
 
 async function main() {
   const hashedPassword = await bcrypt.hash("admin123", 10)
 
-  // Create admin user
   await prisma.user.upsert({
-    where: { email: "admin@gym.com" },
+    where: { username: "admin" },
     update: {},
     create: {
-      email: "admin@gym.com",
+      username: "admin",
       password: hashedPassword,
       role: "ADMIN",
     },
@@ -55,8 +51,8 @@ async function main() {
   }
 
   console.log("✅ Database seeded successfully")
-  console.log("   Admin Email: admin@gym.com")
-  console.log("   Admin Password: admin123")
+  console.log("   Admin username: admin")
+  console.log("   Admin password: admin123")
   console.log("   Default Plans: 5 plans created")
   console.log("   Default Settings: 5 settings created")
 }

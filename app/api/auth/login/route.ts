@@ -93,7 +93,7 @@ export async function POST(request: Request) {
 
     return response
 
-  } catch (error) {
+  } catch {
     // Catch-all failure
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 })
   }

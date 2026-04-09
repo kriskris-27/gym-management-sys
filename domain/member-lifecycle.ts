@@ -7,7 +7,7 @@ import {
   syncMemberOperationalStatus,
 } from "./subscription"
 import type { DateTime } from "luxon"
-import { fromDate, nowUTC } from "@/lib/utils"
+import { fromDate } from "@/lib/utils"
 import { GYM_TIMEZONE, gymNow, isMembershipEndPast } from "@/lib/gym-datetime"
 
 type Tx = Prisma.TransactionClient

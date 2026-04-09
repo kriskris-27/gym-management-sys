@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma"
 import type { Prisma } from "@prisma/client"
-import { calcDuration, formatDuration, fromDate, nowUTC } from "../lib/utils"
+import { calcDuration, formatDuration, fromDate } from "../lib/utils"
 import { DateTime } from "luxon"
 import {
   formatMemberDate,
@@ -11,10 +11,9 @@ import {
 import { lazyExpireStaleSubscriptionsAndSyncMember } from "./subscription"
 
 // Type for Prisma transaction - inferred from prisma instance
-type PrismaTransaction = Parameters<typeof prisma.$transaction>[0] extends (tx: infer T) => any ? T : never
-
-// AutoCloseReason enum values from schema
-type AutoCloseReason = 'MAX_DURATION' | 'PREVIOUS_DAY'
+type PrismaTransaction = Parameters<typeof prisma.$transaction>[0] extends (tx: infer T) => unknown
+  ? T
+  : never
 
 export interface AttendanceSession {
   id: string
@@ -224,9 +223,12 @@ export async function scanMember(
           checkInAt: newSession.checkIn.toISOString(),
           sessionId: newSession.id
         }
-      } catch (error: any) {
-        // Unique constraint hit - session already exists
-        if (error?.code === 'P2002') {
+      } catch (error: unknown) {
+        const code =
+          error && typeof error === "object" && "code" in error
+            ? String((error as { code?: string }).code)
+            : ""
+        if (code === "P2002") {
           todaySession = await tx.attendanceSession.findFirst({
             where: { 
               memberId: member.id,

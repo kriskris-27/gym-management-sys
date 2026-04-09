@@ -1,9 +1,10 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaNeon } from "@prisma/adapter-neon"
-import { neonConfig, Pool } from "@neondatabase/serverless"
+import { neonConfig, Pool, type WebSocketConstructor } from "@neondatabase/serverless"
 
 if (process.env.NODE_ENV === "development") {
-  const ws = require("ws")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Neon serverless needs ws only in dev
+  const ws = require("ws") as unknown as WebSocketConstructor
   neonConfig.webSocketConstructor = ws
 }
 

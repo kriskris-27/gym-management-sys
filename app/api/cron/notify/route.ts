@@ -76,7 +76,7 @@ export async function POST(request: Request) {
           data: { memberId: m.id, type: 'EXPIRY_5_DAY', status: ok ? 'sent' : 'failed' } 
         })
         if (ok) stats.expiry5Day.sent++; else stats.expiry5Day.failed++;
-      } catch (e) { stats.expiry5Day.failed++; }
+      } catch { stats.expiry5Day.failed++; }
     }
 
     // Process 1-Day window
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
           data: { memberId: m.id, type: 'EXPIRY_1_DAY', status: ok ? 'sent' : 'failed' } 
         })
         if (ok) stats.expiry1Day.sent++; else stats.expiry1Day.failed++;
-      } catch (e) { stats.expiry1Day.failed++; }
+      } catch { stats.expiry1Day.failed++; }
     }
 
 
@@ -180,7 +180,7 @@ export async function POST(request: Request) {
           data: { memberId: m.id, type: 'INACTIVITY', status: ok ? 'sent' : 'failed' } 
         })
         if (ok) stats.inactivity.sent++; else stats.inactivity.failed++;
-      } catch (e) { stats.inactivity.failed++; }
+      } catch { stats.inactivity.failed++; }
     }
 
     return NextResponse.json({ 

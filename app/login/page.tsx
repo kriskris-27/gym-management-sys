@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 
 const schema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -106,10 +107,13 @@ export default function LoginPage() {
         <div className="hidden md:flex flex-col justify-between p-12 border-right border-[#1C1C1C] animate-slideInLeft border-r-[1px]">
           {/* TOP: Logo row */}
           <div className="flex items-center gap-3">
-            <img 
-              src="/logo.png" 
-              alt="Royal Fitness" 
+            <Image
+              src="/logo.png"
+              alt="Royal Fitness"
+              width={40}
+              height={40}
               className="w-10 h-10 object-contain"
+              unoptimized
             />
             <span className="text-[#D11F00] text-[11px] font-bold tracking-[0.25em] uppercase">
               Royal Fitness
@@ -148,10 +152,13 @@ export default function LoginPage() {
         {/* MOBILE LOGO DISPLAY */}
         <div className="flex md:hidden flex-col p-8 gap-6 animate-slideInLeft">
           <div className="flex items-center gap-3">
-            <img 
-              src="/logo.png" 
-              alt="Royal Fitness" 
+            <Image
+              src="/logo.png"
+              alt="Royal Fitness"
+              width={40}
+              height={40}
               className="w-10 h-10 object-contain"
+              unoptimized
             />
             <span className="text-[#D11F00] text-[11px] font-bold tracking-[0.25em] uppercase">
               Royal Fitness

@@ -65,11 +65,12 @@ export default function DashboardPage() {
     return () => clearInterval(id)
   }, [])
 
+  const todayDate = data?.today?.date
   const headerDateLabel = useMemo(() => {
-    if (!data?.today?.date) return "Loading..."
-    const d = parseGymDateOnly(data.today.date)
-    return d ? formatGymDateLong(d) : data.today.date
-  }, [data?.today?.date])
+    if (!todayDate) return "Loading..."
+    const d = parseGymDateOnly(todayDate)
+    return d ? formatGymDateLong(d) : todayDate
+  }, [todayDate])
 
   return (
     <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 overflow-x-hidden">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, use, useRef } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { useForm } from "react-hook-form"
@@ -17,22 +17,6 @@ import {
   todayYmdInIST,
 } from "@/lib/gym-datetime"
 
-interface Member {
-  id: string
-  name: string
-  phone: string
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS" | "NONE"
-  startDate: string | null
-  endDate: string | null
-  status: "ACTIVE" | "INACTIVE" | "DELETED"
-  subscriptionStatus?: string
-  planUiState?: "LIVE" | "CANCELLED" | "EXPIRED" | "NEEDS_PLAN"
-  futurePlansCount?: number
-  /** EXPIRED sub but end date not past IST — e.g. after delete + restore */
-  canReopenLastPlan?: boolean
-  createdAt: string
-}
-
 interface AttendanceRecord {
   id: string
   date: string
@@ -40,13 +24,6 @@ interface AttendanceRecord {
   checkedOutAt: string | null
   durationMinutes: number | null
   autoClosed: boolean
-}
-
-interface PaymentSummary {
-  totalAmount: number
-  totalPaid: number
-  remaining: number
-  isPaidFull: boolean
 }
 
 interface PaymentRecord {
@@ -64,11 +41,6 @@ interface PaymentRecord {
     endDate: string
     status: string
   } | null
-}
-
-interface PricingPlan {
-  membershipType: "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "ANNUAL" | "OTHERS"
-  amount: number
 }
 
 interface RenewalFormData {
@@ -162,6 +134,24 @@ export default function MemberProfilePage() {
   const loading = memberLoading || paymentsLoading || summaryLoading || attendanceLoading
   const notFound = memberError || (!memberLoading && !member)
 
+  const endInfo = member
+    ? getMembershipDayInfo(member.endDate)
+    : { isPastEnd: false, daysUntilEndInclusive: 0, daysSinceEnd: 0 }
+  const planUiState =
+    !member
+      ? "NEEDS_PLAN"
+      : member.planUiState ??
+        (member.subscriptionStatus === "ACTIVE" && member.endDate && !endInfo.isPastEnd
+          ? "LIVE"
+          : member.subscriptionStatus === "CANCELLED"
+            ? "CANCELLED"
+            : member.subscriptionStatus === "EXPIRED" || (member.endDate && endInfo.isPastEnd)
+              ? "EXPIRED"
+              : "NEEDS_PLAN")
+  const needsPlan = planUiState === "NEEDS_PLAN"
+  const isDeletedMember = member?.status === "DELETED"
+  const isAddPlanMode = Boolean(isDeletedMember || needsPlan)
+
   // Debug paymentSummary changes
   useEffect(() => {
     console.log("👀 paymentSummary changed:", paymentSummary)
@@ -185,7 +175,6 @@ export default function MemberProfilePage() {
   const [showRenewalModal, setShowRenewalModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [renewLoading, setRenewLoading] = useState(false)
   const [reopenLoading, setReopenLoading] = useState(false)
   const [reopenError, setReopenError] = useState("")
 
@@ -431,7 +420,7 @@ export default function MemberProfilePage() {
 
   // Renewal Form Hook
   const [renewalSuccess, setRenewalSuccess] = useState(false)
-  const { register: regRenewal, handleSubmit: handleRenewalSubmit, reset: resetRenewal, watch: watchRenewal, setValue: setRenewalValue, formState: { errors: renewalErrors, isSubmitting: isRenewing } } = useForm<RenewalFormData>({
+  const { register: regRenewal, handleSubmit: handleRenewalSubmit, reset: resetRenewal, watch: watchRenewal, formState: { isSubmitting: isRenewing } } = useForm<RenewalFormData>({
     defaultValues: {
       membershipType:
         member?.membershipType && member.membershipType !== "NONE" ? member.membershipType : "MONTHLY",
@@ -473,12 +462,11 @@ export default function MemberProfilePage() {
         customPrice: undefined,
       })
     }
-  }, [member, showRenewalModal, resetRenewal])
+  }, [member, showRenewalModal, resetRenewal, isAddPlanMode])
 
   const onRenewalSubmit = async (data: RenewalFormData) => {
     try {
       setRenewError("")
-      setRenewLoading(true)
 
       // Deleted member flow: restore first, then add a new plan starting today (or chosen date).
       if (isDeletedMember) {
@@ -536,8 +524,6 @@ export default function MemberProfilePage() {
     } catch (e) {
       console.error(e)
       setRenewError("A network error occurred. Please try again.")
-    } finally {
-      setRenewLoading(false)
     }
   }
 
@@ -572,28 +558,13 @@ export default function MemberProfilePage() {
     )
   }
 
-  const endInfo = getMembershipDayInfo(member.endDate)
-
-  const planUiState =
-    member.planUiState ??
-    (member.subscriptionStatus === "ACTIVE" && member.endDate && !endInfo.isPastEnd
-      ? "LIVE"
-      : member.subscriptionStatus === "CANCELLED"
-        ? "CANCELLED"
-        : member.subscriptionStatus === "EXPIRED" || (member.endDate && endInfo.isPastEnd)
-          ? "EXPIRED"
-          : "NEEDS_PLAN")
-
   const isLivePlan = planUiState === "LIVE"
   const isCancelledPlan = planUiState === "CANCELLED"
   const isExpiredPlan = planUiState === "EXPIRED"
-  const needsPlan = planUiState === "NEEDS_PLAN"
   const daysUntilEnd = endInfo.daysUntilEndInclusive
   const daysSinceEnd = endInfo.daysSinceEnd
   const isExpiringSoon =
     isLivePlan && !endInfo.isPastEnd && daysUntilEnd >= 0 && daysUntilEnd <= 7
-  const isDeletedMember = member.status === "DELETED"
-  const isAddPlanMode = isDeletedMember || needsPlan
   const shouldShowRenew = !isDeletedMember && isExpiredPlan && endInfo.isPastEnd
   const showReopenLastPlan =
     !isDeletedMember &&
@@ -1007,15 +978,17 @@ export default function MemberProfilePage() {
             </div>
           ) : (
             <div className="divide-y divide-[#1C1C1C]">
-              {Object.entries(
-                payments
-                  .filter((p: PaymentRecord) => p.amount > 0)
-                  .reduce((acc: Record<string, PaymentRecord[]>, p) => {
-                    const key = p.subscription?.id ?? p.subscriptionId ?? "UNASSIGNED"
-                    acc[key] = acc[key] ?? []
-                    acc[key].push(p)
-                    return acc
-                  }, {})
+              {(
+                Object.entries(
+                  payments
+                    .filter((p: PaymentRecord) => p.amount > 0)
+                    .reduce((acc: Record<string, PaymentRecord[]>, p: PaymentRecord) => {
+                      const key = p.subscription?.id ?? p.subscriptionId ?? "UNASSIGNED"
+                      acc[key] = acc[key] ?? []
+                      acc[key].push(p)
+                      return acc
+                    }, {})
+                ) as [string, PaymentRecord[]][]
               )
                 .sort(([aKey, aItems], [bKey, bItems]) => {
                   // Always keep unassigned bucket at the end.
@@ -1035,14 +1008,21 @@ export default function MemberProfilePage() {
                   if (bEndTs !== aEndTs) return bEndTs - aEndTs
 
                   // Tie-breaker 2: latest payment date in group first.
-                  const aLatestPayTs = Math.max(...aItems.map((p) => new Date(p.date).getTime()))
-                  const bLatestPayTs = Math.max(...bItems.map((p) => new Date(p.date).getTime()))
+                  const aLatestPayTs = Math.max(
+                    ...aItems.map((p) => new Date(p.date).getTime())
+                  )
+                  const bLatestPayTs = Math.max(
+                    ...bItems.map((p) => new Date(p.date).getTime())
+                  )
                   return bLatestPayTs - aLatestPayTs
                 })
                 .map(([key, items]) => {
                 const sub = items[0]?.subscription ?? null
-                const total = items.reduce((s, p) => s + (p.amount || 0), 0)
-                const totalDiscount = items.reduce((s, p) => s + (p.discountAmount || 0), 0)
+                const total = items.reduce((s, p: PaymentRecord) => s + (p.amount || 0), 0)
+                const totalDiscount = items.reduce(
+                  (s, p: PaymentRecord) => s + (p.discountAmount || 0),
+                  0
+                )
                 const label =
                   key === "UNASSIGNED"
                     ? "Unassigned payments"
@@ -1089,7 +1069,7 @@ export default function MemberProfilePage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {items.map((pay) => {
+                          {items.map((pay: PaymentRecord) => {
                             const modeColor =
                               pay.mode === "CASH"
                                 ? "bg-[#10B981]/10 text-[#10B981]"

@@ -35,13 +35,12 @@ export default function MembersPage() {
   const [paymentFilter, setPaymentFilter] = useState("All Payments")
 
   useEffect(() => {
-    const id = window.setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    const id = window.setTimeout(() => {
+      setDebouncedSearch(search.trim())
+      setPage(1)
+    }, 300)
     return () => clearTimeout(id)
   }, [search])
-
-  useEffect(() => {
-    setPage(1)
-  }, [debouncedSearch, statusFilter])
 
   const statusMap: Record<string, string | undefined> = {
     "All": undefined,
@@ -206,7 +205,10 @@ export default function MembersPage() {
           {["All", "Active", "Inactive", "Deleted"].map(tab => (
             <button
               key={tab}
-              onClick={() => setStatusFilter(tab)}
+              onClick={() => {
+                setStatusFilter(tab)
+                setPage(1)
+              }}
               className={`
                 px-4 py-1.5 rounded-md text-[12px] font-medium transition-all duration-200 whitespace-nowrap cursor-pointer
                 ${statusFilter === tab

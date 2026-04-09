@@ -151,29 +151,6 @@ export function assertNoCurrentPlanOverpay(args: {
   return { ok: true }
 }
 
-// Import interfaces from subscription domain
-interface Subscription {
-  id: string
-  memberId: string
-  planId: string
-  startDate: Date
-  endDate: Date
-  status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED'
-  planNameSnapshot: string
-  planPriceSnapshot: number
-  createdAt: Date
-  plan?: Plan
-}
-
-interface Plan {
-  id: string
-  name: string
-  durationDays: number
-  price: number
-  isActive: boolean
-  createdAt: Date
-}
-
 export interface Payment {
   id: string
   memberId: string
@@ -406,8 +383,7 @@ export async function createPayment(
   subscriptionId: string | null,
   calculation: PaymentCalculation,
   method: 'CASH' | 'UPI' | 'CARD',
-  purpose: 'SUBSCRIPTION' | 'ADJUSTMENT' = 'SUBSCRIPTION',
-  notes?: string
+  purpose: 'SUBSCRIPTION' | 'ADJUSTMENT' = 'SUBSCRIPTION'
 ): Promise<Payment> {
   console.log(`[Payment Domain] Creating payment for member: ${memberId}, subscription: ${subscriptionId}`)
 
@@ -453,7 +429,7 @@ export async function getMemberPaymentHistory(
 ): Promise<Payment[]> {
   console.log(`[Payment Domain] Getting payment history for member: ${memberId}`)
 
-  const where: any = { memberId }
+  const where: Prisma.PaymentWhereInput = { memberId }
   
   // Filter by subscription if provided
   if (subscriptionId) {

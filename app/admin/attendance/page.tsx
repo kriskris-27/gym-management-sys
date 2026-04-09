@@ -4,7 +4,6 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import { useAttendanceToday } from "@/hooks/useAttendance";
-import { useAttendanceScan } from "@/hooks/useAttendanceScan";
 import { formatDuration } from "@/lib/utils";
 import { formatGymDateLong, formatGymTime, gymNow } from "@/lib/gym-datetime";
 import SpeedLoader from "@/app/components/SpeedLoader";
@@ -43,9 +42,6 @@ export default function AttendancePage() {
   const data = rawData as AttendanceData | undefined;
   const [filter, setFilter] = useState("All");
   const [now, setNow] = useState(new Date());
-  
-  // Attendance scan mutation for immediate updates
-  const scanMutation = useAttendanceScan();
 
   const memberIds = useMemo(
     () => [...new Set(data?.records.map((r) => r.memberId) ?? [])],
@@ -99,17 +95,6 @@ export default function AttendancePage() {
     if (hrs === 0) return `${rem}min`;
     if (rem === 0) return `${hrs}hr`;
     return `${hrs}hr ${rem}min`;
-  };
-
-  // Example scan handler for immediate updates
-  const handleScan = async (phone: string) => {
-    try {
-      await scanMutation.mutateAsync(phone);
-      // UI will update immediately due to query invalidation in the mutation
-    } catch (error) {
-      console.error("Scan failed:", error);
-      // Handle error (show toast, etc.)
-    }
   };
 
   const filtered = (data?.records ?? []).filter((r) => {

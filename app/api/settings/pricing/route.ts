@@ -119,7 +119,7 @@ export async function PUT(request: Request) {
     })
     
     const updatedPricing = ORDER.map(type => {
-      const found = updatedPlans.find((p: any) => p.name === type);
+      const found = updatedPlans.find((p: { name: string; price: number }) => p.name === type)
       return { membershipType: type, amount: found ? found.price : 0 };
     });
 

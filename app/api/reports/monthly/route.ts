@@ -1,25 +1,21 @@
 import { NextResponse } from "next/server"
 import { DateTime } from "luxon"
+import type { Prisma } from "@prisma/client"
 import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { GYM_TIMEZONE, gymNow } from "@/lib/gym-datetime"
 
-// Type definitions for report data
-interface PaymentWithMember {
-  amount: number
-  mode: string
-  date: Date
-  member: {
-    membershipType: string
-    createdAt: Date
+type MonthlyPaymentRow = Prisma.PaymentGetPayload<{
+  include: {
+    member: { select: { createdAt: true } }
+    subscription: { select: { planNameSnapshot: true; startDate: true } }
   }
-}
+}>
 
-interface AttendanceRecord {
-  id: string
-  checkedInAt: Date
+type MonthlySessionRow = {
   memberId: string
-  durationMinutes: number | null
+  checkIn: Date
+  checkOut: Date | null
 }
 
 /**
@@ -83,7 +79,7 @@ export async function GET(request: Request) {
     let revenueCollected = 0
 
     // Cash Collections Logic
-    payments.forEach((p: any) => {
+    payments.forEach((p: MonthlyPaymentRow) => {
       const amt = p.finalAmount || 0
       if (amt <= 0) return
       revenueCollected += amt
@@ -105,7 +101,7 @@ export async function GET(request: Request) {
 
     // Sales Revenue (Accrual) Logic
     const expectedRevenueTotal = monthlySubscriptions.reduce((sum, s) => sum + (s.planPriceSnapshot || 0), 0)
-    const collectedForCurrentMonthSales = payments.reduce((sum, p: any) => {
+    const collectedForCurrentMonthSales = payments.reduce((sum, p: MonthlyPaymentRow) => {
       const soldThisMonth =
         !!p.subscription &&
         p.subscription.startDate >= startOfMonth &&
@@ -113,7 +109,7 @@ export async function GET(request: Request) {
       if (!soldThisMonth) return sum
       return sum + (p.finalAmount || 0)
     }, 0)
-    const discountTotal = payments.reduce((sum, p: any) => {
+    const discountTotal = payments.reduce((sum, p: MonthlyPaymentRow) => {
       const soldThisMonth =
         !!p.subscription &&
         p.subscription.startDate >= startOfMonth &&
@@ -137,14 +133,14 @@ export async function GET(request: Request) {
     // 4. TRAFFIC PROCESSING
     const traffic = {
       totalSessions: sessions.length,
-      uniqueHeadcount: new Set(sessions.map((a: any) => a.memberId)).size,
+      uniqueHeadcount: new Set(sessions.map((a: MonthlySessionRow) => a.memberId)).size,
       accumulatedDuration: 0,
       durationCount: 0,
       dailySummary: {} as Record<string, { count: number; totalDuration: number; durationCount: number }>,
       hourHeatmap: {} as Record<number, number>
     }
 
-    sessions.forEach((a: any) => {
+    sessions.forEach((a: MonthlySessionRow) => {
       const checkInZ = DateTime.fromJSDate(a.checkIn, { zone: "utc" }).setZone(GYM_TIMEZONE)
       const dateKey = checkInZ.toFormat("yyyy-LL-dd")
       if (!traffic.dailySummary[dateKey]) traffic.dailySummary[dateKey] = { count: 0, totalDuration: 0, durationCount: 0 }

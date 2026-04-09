@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { AttendanceScanSchema } from "@/lib/validations"
-import { z } from "zod"
 
 interface ScanResponse {
   status: "CHECKED_IN" | "CHECKED_OUT" | "ALREADY_DONE" | "NOT_FOUND" | "INACTIVE"
