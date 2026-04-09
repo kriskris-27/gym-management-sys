@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "pnpm dlx prisma@5.22.0 generate && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -47,6 +51,8 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5",
-    "ws": "^8.19.0"
+    "vitest": "^3.2.4",
+    "ws": "^8.19.0",
+    "@playwright/test": "^1.56.0"
   }
 }

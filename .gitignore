@@ -12,6 +12,43 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+/e2e/
+/vitest-report/
+/.nyc_output/
+
+# local/dev cache artifacts
+/.turbo/
+/.cache/
+.eslintcache
+.stylelintcache
+
+# logs / runtime dumps
+logs/
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# playwright screenshots/videos/traces
+**/playwright/.cache/
+**/playwright-report/
+**/blob-report/
+**/test-results/
+*.zip
+
+# IDE / OS junk
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+Thumbs.db
 
 # next.js
 /.next/

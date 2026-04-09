@@ -27,7 +27,11 @@ export function useDashboard() {
         },
       }
     },
-    staleTime: 30 * 1000,
-    refetchInterval: 30 * 1000,
+    staleTime: 0,
+    refetchInterval: () =>
+      typeof document !== "undefined" && document.visibilityState === "visible" ? 3000 : 15000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
 }

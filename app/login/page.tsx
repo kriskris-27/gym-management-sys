@@ -47,6 +47,7 @@ export default function LoginPage() {
         body: JSON.stringify(data)
       })
       if (res.ok) {
+        sessionStorage.setItem("show_post_login_intro", "1")
         router.push("/admin/dashboard")
       } else {
         const json = await res.json()

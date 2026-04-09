@@ -3,6 +3,13 @@ import { prisma } from "../lib/prisma"
 import { subscriptionWindowCoversNow } from "../lib/gym-datetime"
 import { findLiveSubscription, getActiveSubscription } from "./subscription"
 
+export { assertGlobalPaymentAllowed, assertNoCurrentPlanOverpay } from "./payment-guards"
+import { validatePaymentAmount } from "./payment-validation"
+import { computePaymentFromBase } from "./payment-calculation"
+
+export { validatePaymentAmount } from "./payment-validation"
+export { computePaymentFromBase } from "./payment-calculation"
+
 /** Prisma client or transaction — same aggregates for global ledger. */
 export type PaymentDb = typeof prisma | Prisma.TransactionClient
 
@@ -40,8 +47,6 @@ export async function computeGlobalMemberLedger(
     isPaidFull: remaining <= 1,
   }
 }
-
-const RUPEE_ROUND_SLACK = 1
 
 /**
  * Balance left on the **live** subscription (IST window covers today).
@@ -100,55 +105,6 @@ export async function getLivePlanPaymentRemaining(
     paid,
     remaining,
   }
-}
-
-/** Block any payment that would exceed total member liability (all non-cancelled subs). */
-export function assertGlobalPaymentAllowed(args: {
-  amount: number
-  globalRemaining: number
-}): { ok: true } | { ok: false; code: string; message: string } {
-  const pay = Math.round(args.amount)
-  const rem = args.globalRemaining
-  if (rem <= RUPEE_ROUND_SLACK && pay > 0) {
-    return {
-      ok: false,
-      code: "MEMBER_FULLY_PAID",
-      message:
-        "This member has no outstanding balance on the ledger. Remove or reduce the amount.",
-    }
-  }
-  if (pay > rem + RUPEE_ROUND_SLACK) {
-    return {
-      ok: false,
-      code: "OVERPAY_GLOBAL",
-      message: `Amount (₹${pay}) exceeds total remaining balance (₹${Math.max(0, rem)}).`,
-    }
-  }
-  return { ok: true }
-}
-
-export function assertNoCurrentPlanOverpay(args: {
-  amount: number
-  remaining: number
-}): { ok: true } | { ok: false; code: string; message: string } {
-  const pay = Math.round(args.amount)
-  const rem = args.remaining
-  if (rem <= RUPEE_ROUND_SLACK && pay > 0) {
-    return {
-      ok: false,
-      code: "CURRENT_PLAN_FULLY_PAID",
-      message:
-        "This membership is already fully paid. You cannot record another payment against the current plan.",
-    }
-  }
-  if (pay > rem + RUPEE_ROUND_SLACK) {
-    return {
-      ok: false,
-      code: "OVERPAY_CURRENT_PLAN",
-      message: `Amount (₹${pay}) is more than the balance for the current plan (₹${rem}).`,
-    }
-  }
-  return { ok: true }
 }
 
 export interface Payment {
@@ -285,93 +241,7 @@ export async function calculatePayment(
   // Base amount from subscription price snapshot
   const baseAmount = subscription.planPriceSnapshot
   console.log(`[Payment Domain] Base amount from subscription: ${baseAmount}`)
-
-  // Calculate total discount
-  let totalDiscount = 0
-  let discountReason = ''
-
-  // Member-specific discount (percentage)
-  if (memberDiscountPercent && memberDiscountPercent > 0) {
-    const memberDiscount = Math.round(baseAmount * (memberDiscountPercent / 100))
-    totalDiscount += memberDiscount
-    discountReason += `Member ${memberDiscountPercent}% off, `
-  }
-
-  // Additional flat discount
-  if (additionalDiscount && additionalDiscount > 0) {
-    totalDiscount += additionalDiscount
-    discountReason += `Additional ₹${additionalDiscount} off, `
-  }
-
-  // Apply discount caps (percentage + absolute)
-  const maxDiscountPercent = 50 // 50% max discount
-  const maxDiscountAbsolute = Math.round(baseAmount * 0.5) // Max 50% of plan price
-  
-  const percentageCap = Math.round(baseAmount * (maxDiscountPercent / 100))
-  const finalDiscountCap = Math.min(percentageCap, maxDiscountAbsolute)
-  
-  // Ensure discount doesn't exceed caps
-  totalDiscount = Math.min(totalDiscount, finalDiscountCap)
-
-  const finalAmount = baseAmount - totalDiscount
-  console.log(`[Payment Domain] Base: ${baseAmount}, Discount: ${totalDiscount}, Final: ${finalAmount}`)
-  console.log(`[Payment Domain] Discount caps applied: Percentage(${percentageCap}), Absolute(${maxDiscountAbsolute}), Final(${finalDiscountCap})`)
-
-  return {
-    baseAmount,
-    discountAmount: totalDiscount,
-    finalAmount,
-    discountReason: discountReason.trim() || undefined
-  }
-}
-
-/**
- * Validate payment amount (controlled validation)
- * BUSINESS RULE: Never "trust admin blindly"
- * FINAL RULE: Payment must satisfy business constraints
- */
-export function validatePaymentAmount(
-  baseAmount: number,
-  finalAmount: number,
-  purpose: 'SUBSCRIPTION' | 'ADJUSTMENT' = 'SUBSCRIPTION'
-): {
-  isValid: boolean
-  errors: string[]
-  warnings: string[]
-} {
-  const errors: string[] = []
-  const warnings: string[] = []
-
-  // Rule 1: Final amount must be non-negative
-  if (finalAmount < 0) {
-    errors.push('Final amount cannot be negative')
-  }
-
-  // Rule 2: Final amount cannot exceed base amount (for subscriptions)
-  if (purpose === 'SUBSCRIPTION' && finalAmount > baseAmount) {
-    errors.push('Subscription payment cannot exceed base amount')
-  }
-
-  // Rule 3: Final amount must be reasonable
-  if (finalAmount > 99999) {
-    errors.push('Payment amount exceeds maximum limit')
-  }
-
-  // Rule 4: Check for suspiciously low amounts
-  if (finalAmount > 0 && finalAmount < baseAmount * 0.1) {
-    warnings.push('Payment amount is suspiciously low (less than 10% of base amount)')
-  }
-
-  // Rule 5: Check for rounding issues
-  if (finalAmount > 0 && finalAmount % 1 !== 0) {
-    warnings.push('Payment amount has decimal places - consider rounding')
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors,
-    warnings
-  }
+  return computePaymentFromBase(baseAmount, memberDiscountPercent, additionalDiscount)
 }
 
 /**
@@ -388,7 +258,11 @@ export async function createPayment(
   console.log(`[Payment Domain] Creating payment for member: ${memberId}, subscription: ${subscriptionId}`)
 
   // Validate payment amount before creation
-  const validation = validatePaymentAmount(calculation.baseAmount, calculation.finalAmount, purpose)
+  const validation = validatePaymentAmount(
+    calculation.baseAmount,
+    calculation.finalAmount,
+    purpose
+  )
   
   if (!validation.isValid) {
     throw new Error(`Payment validation failed: ${validation.errors.join(', ')}`)
