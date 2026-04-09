@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+  body {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -182,10 +197,11 @@ body {
   right: -32px;
 }
 
-/* Reusable animated card shell (neutral) */
+/* Reusable animated card shell (neutral) — min-height + auto grow so figures never clip vertically */
 .themeFxCardOuter {
   width: 100%;
-  height: 120px;
+  min-height: 120px;
+  height: auto;
   border-radius: 12px;
   padding: 1px;
   background: radial-gradient(circle 230px at 0% 0%, #cfcfcf, #0c0d0d);
@@ -195,13 +211,20 @@ body {
 .themeFxCard {
   z-index: 1;
   width: 100%;
-  height: 100%;
+  min-height: 118px;
   border-radius: 11px;
   border: solid 1px #202222;
   background: radial-gradient(circle 280px at 0% 0%, #3a3a3a, #0c0d0d);
   position: relative;
-  overflow: hidden;
-  padding: 20px;
+  overflow-x: clip;
+  overflow-y: visible;
+  padding: 14px 14px 16px;
+}
+
+@media (min-width: 768px) {
+  .themeFxCard {
+    padding: 18px 18px 20px;
+  }
 }
 
 .themeFxCardRay {

@@ -227,9 +227,9 @@ function CheckinContent() {
 
   return (
     <div
-      className={`relative flex min-h-screen flex-col items-center justify-center overflow-x-hidden bg-[#080808] px-6 pt-[env(safe-area-inset-top)] ${
+      className={`relative flex min-h-dvh flex-col items-center justify-center overflow-x-hidden bg-[#080808] px-4 sm:px-6 md:px-8 pt-[max(0.75rem,env(safe-area-inset-top))] ${
         showFooterLink ? "pb-24" : ""
-      } pb-[max(1rem,env(safe-area-inset-bottom))]`}
+      } pb-[max(1.25rem,env(safe-area-inset-bottom))]`}
       style={{ touchAction: "manipulation" }}
     >
       <style>{`
@@ -264,7 +264,7 @@ function CheckinContent() {
 
       {/* STATE: idle — phone entry */}
       {status === "idle" && (
-        <div className="checkin-state flex w-full max-w-[360px] flex-col items-center">
+        <div className="checkin-state flex w-full max-w-[min(100%,26rem)] flex-col items-center">
           <div className="mb-10 flex flex-col items-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#D11F00]">
               <span className="text-[20px] font-black text-white">S</span>
@@ -328,7 +328,7 @@ function CheckinContent() {
 
       {/* STATE: checked in */}
       {status === "checked_in" && result && (
-        <div className="checkin-state flex w-full max-w-[360px] flex-col items-center text-center">
+        <div className="checkin-state flex w-full max-w-[min(100%,26rem)] flex-col items-center text-center">
           <div className="checkin-circle flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#10B981] bg-[#10B981]/10">
             <span className="text-[36px] font-black text-[#10B981]">✓</span>
           </div>
@@ -369,7 +369,7 @@ function CheckinContent() {
 
       {/* STATE: checked out */}
       {status === "checked_out" && result && (
-        <div className="checkin-state flex w-full max-w-[360px] flex-col items-center text-center">
+        <div className="checkin-state flex w-full max-w-[min(100%,26rem)] flex-col items-center text-center">
           <div className="checkin-circle flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#D11F00] bg-[#D11F00]/10">
             <span className="text-[36px] font-black text-[#D11F00]">✓</span>
           </div>
@@ -412,7 +412,7 @@ function CheckinContent() {
 
       {/* STATE: already done */}
       {status === "already_done" && result && (
-        <div className="checkin-state flex w-full max-w-[360px] flex-col items-center text-center">
+        <div className="checkin-state flex w-full max-w-[min(100%,26rem)] flex-col items-center text-center">
           <div className="checkin-circle flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#666666] bg-[#1C1C1C]">
             <span className="text-[32px] text-[#888888]">ℹ</span>
           </div>
@@ -455,7 +455,7 @@ function CheckinContent() {
 
       {/* STATE: inactive — Membership Expired */}
       {status === "inactive" && result && (
-        <div className="checkin-state flex w-full max-w-[360px] flex-col items-center text-center">
+        <div className="checkin-state flex w-full max-w-[min(100%,26rem)] flex-col items-center text-center">
           <div className="checkin-circle flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#F59E0B] bg-[#F59E0B]/10">
             <span className="text-[36px] text-[#F59E0B]">⏰</span>
           </div>
@@ -487,7 +487,7 @@ function CheckinContent() {
 
       {/* STATE: not found */}
       {status === "not_found" && (
-        <div className="checkin-state flex w-full max-w-[360px] flex-col items-center text-center">
+        <div className="checkin-state flex w-full max-w-[min(100%,26rem)] flex-col items-center text-center">
           <div className="checkin-circle flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#EF4444] bg-[#EF4444]/10">
             <span className="text-[36px] font-black text-[#EF4444]">✕</span>
           </div>
@@ -512,7 +512,7 @@ function CheckinContent() {
 
       {/* STATE: error */}
       {status === "error" && (
-        <div className="checkin-state flex max-w-[360px] flex-col items-center text-center">
+        <div className="checkin-state flex w-full max-w-[min(100%,26rem)] flex-col items-center text-center">
           <p className="text-[15px] text-[#EF4444]">{errorMessage}</p>
           <button
             type="button"
@@ -545,7 +545,7 @@ function CheckinContent() {
 
 function CheckinFallback() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#080808] px-6">
+    <div className="flex min-h-dvh flex-col items-center justify-center bg-[#080808] px-4 sm:px-6 pb-[env(safe-area-inset-bottom)]">
       <div className="checkin-spin h-12 w-12 rounded-full border-2 border-[#D11F00] border-t-transparent" />
       <p className="mt-4 text-[14px] text-[#444444]">Loading...</p>
       <style>{`

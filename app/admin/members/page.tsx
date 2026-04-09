@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useMembers } from "@/hooks/useMembers"
 import { useRestoreMember } from "@/hooks/useRestoreMember"
 import SpeedLoader from "@/app/components/SpeedLoader"
+import { adminPageLoadingClass, adminPageShellClass } from "@/app/components/admin-page-shell"
 import { formatMemberDate } from "@/lib/gym-datetime"
 
 interface Member {
@@ -62,7 +63,7 @@ export default function MembersPage() {
 
   if (loading) {
     return (
-      <div className="w-full min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+      <div className={adminPageLoadingClass}>
         <SpeedLoader />
         <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading members</p>
       </div>
@@ -158,7 +159,7 @@ export default function MembersPage() {
   }
 
   return (
-    <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 overflow-x-hidden">
+    <div className={adminPageShellClass}>
       <style>{`
         @keyframes fadeUp {
           from { transform: translateY(16px); opacity: 0; }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { adminPageShellClass } from "@/app/components/admin-page-shell"
 import { useForm, type Resolver, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -218,7 +219,7 @@ export default function AddMemberPage() {
   }, [errors]);
 
   return (
-    <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 flex flex-col items-start overflow-x-hidden">
+    <div className={`${adminPageShellClass} flex flex-col items-start`}>
       <style>{`
         @keyframes fadeUp {
           from { transform: translateY(20px); opacity: 0; }

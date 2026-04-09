@@ -4,9 +4,10 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import { useAttendanceToday } from "@/hooks/useAttendance";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, statCountClass } from "@/lib/utils";
 import { formatGymDateLong, formatGymTime, gymNow } from "@/lib/gym-datetime";
 import SpeedLoader from "@/app/components/SpeedLoader";
+import { adminPageLoadingClass, adminPageShellClass } from "@/app/components/admin-page-shell";
 
 interface PaymentSummary {
   dueAmount: number;
@@ -123,7 +124,7 @@ export default function AttendancePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+      <div className={adminPageLoadingClass}>
         <SpeedLoader />
         <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading attendance</p>
       </div>
@@ -131,7 +132,7 @@ export default function AttendancePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30">
+    <div className={adminPageShellClass}>
       <style>{`
         @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
         @keyframes pulse-dot {
@@ -158,23 +159,23 @@ export default function AttendancePage() {
       </div>
 
       {/* STAT CARDS */}
-      <div className="grid grid-cols-3 gap-4 mt-6 animate-page">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 animate-page">
         {/* Total Present */}
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">
                 Total Present
               </p>
               {loading ? (
                 <div className="bg-[#1C1C1C] h-10 w-20 rounded animate-pulse mb-2" />
               ) : (
-                <p className="text-white text-[36px] font-black leading-none">
+                <p className={`text-white font-black ${statCountClass}`}>
                   {data?.totalPresent ?? 0}
                 </p>
               )}
@@ -184,14 +185,14 @@ export default function AttendancePage() {
         </div>
 
         {/* Inside Now */}
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3 flex items-center gap-2">
                 Inside Now
                 {!loading && currentlyInside > 0 && (
@@ -202,7 +203,7 @@ export default function AttendancePage() {
                 <div className="bg-[#1C1C1C] h-10 w-20 rounded animate-pulse mb-2" />
               ) : (
                 <p
-                  className={`text-[36px] font-black leading-none ${
+                  className={`font-black ${statCountClass} ${
                     currentlyInside > 0 ? "text-[#D11F00]" : "text-white"
                   }`}
                 >
@@ -215,21 +216,21 @@ export default function AttendancePage() {
         </div>
 
         {/* Avg Duration */}
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">
                 Avg Duration
               </p>
               {loading ? (
                 <div className="bg-[#1C1C1C] h-10 w-24 rounded animate-pulse mb-2" />
               ) : (
-                <p className="text-white text-[36px] font-black leading-none">
+                <p className="text-white font-black tabular-nums leading-tight min-w-0 text-[clamp(1rem,3.8vw+0.5rem,1.75rem)] break-words">
                   {avgDuration !== null ? formatDuration(avgDuration) : "—"}
                 </p>
               )}

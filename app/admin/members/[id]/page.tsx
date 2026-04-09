@@ -10,6 +10,7 @@ import { useMember } from "@/hooks/useMembers"
 import { usePayments, usePaymentSummary } from "@/hooks/usePayments"
 import { useMemberAttendance } from "@/hooks/useAttendance"
 import SpeedLoader from "@/app/components/SpeedLoader"
+import { adminPageLoadingClass, adminPageShellClass } from "@/app/components/admin-page-shell"
 import {
   formatMemberDate,
   formatMemberTime,
@@ -18,6 +19,7 @@ import {
   parseGymDateOnly,
   todayYmdInIST,
 } from "@/lib/gym-datetime"
+import { formatRupeeStatCard } from "@/lib/utils"
 
 interface AttendanceRecord {
   id: string
@@ -540,7 +542,7 @@ export default function MemberProfilePage() {
 
   if (loading) {
     return (
-      <div className="w-full min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+      <div className={adminPageLoadingClass}>
          <SpeedLoader />
          <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading member profile</p>
       </div>
@@ -549,8 +551,8 @@ export default function MemberProfilePage() {
 
   if (notFound || !member) {
     return (
-      <div className="w-full min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center">
-         <p className="text-white text-[20px] font-bold text-center mt-16">Member not found</p>
+      <div className={`${adminPageShellClass} flex flex-col items-center justify-center`}>
+         <p className="text-white text-[20px] font-bold text-center">Member not found</p>
          <button onClick={() => router.push("/admin/members")} className="mt-4 text-[#444444] text-[13px] hover:text-white transition-colors">
            ← Back to Members
          </button>
@@ -577,7 +579,7 @@ export default function MemberProfilePage() {
   const totalPages = Math.ceil(attendance.total / ATTENDANCE_LIMIT) || 1
 
   return (
-    <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 overflow-x-hidden">
+    <div className={adminPageShellClass}>
       <style>{`
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
@@ -760,7 +762,7 @@ export default function MemberProfilePage() {
 
       {/* PAYMENT SUMMARY CARD */}
       {summaryLoading ? (
-        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-3 gap-4 z-10 relative">
+        <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 grid grid-cols-1 md:grid-cols-3 gap-4 z-10 relative">
           <div className="border-r border-[#1C1C1C] pr-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
           <div className="border-r border-[#1C1C1C] px-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
           <div className="pl-4"><div className="bg-[#1C1C1C] h-16 rounded animate-pulse" /></div>
@@ -772,22 +774,32 @@ export default function MemberProfilePage() {
         </div>
       ) : paymentSummary ? (
         <div className="mt-4 bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 animate-fade z-10 relative">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-4">
             {/* CELL 1 */}
-            <div className="border-r border-[#1C1C1C] pr-4">
+            <div className="min-w-0 border-b border-[#1C1C1C] pb-4 md:border-b-0 md:border-r md:pr-4 md:pb-0">
               <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Global Due Amount</p>
               {paymentSummary.totalAmount === 0 ? (
-                <p className="text-white text-[24px] font-black">Free Plan</p>
+                <p className="text-white text-[clamp(1.125rem,2.8vw+0.65rem,1.5rem)] font-black">Free Plan</p>
               ) : (
-                <p className="text-white text-[24px] font-black">₹{paymentSummary.totalAmount.toLocaleString('en-IN')}</p>
+                <p
+                  className="text-white font-black tabular-nums leading-tight min-w-0 text-[clamp(1rem,2.6vw+0.55rem,1.5rem)] break-words"
+                  title={`₹${paymentSummary.totalAmount.toLocaleString("en-IN")}`}
+                >
+                  {formatRupeeStatCard(paymentSummary.totalAmount)}
+                </p>
               )}
               <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">lifetime ledger across all non-cancelled plans</p>
             </div>
 
             {/* CELL 2 */}
-            <div className="border-r border-[#1C1C1C] px-4">
+            <div className="md:border-r border-[#1C1C1C] md:px-4 pb-4 md:pb-0 border-b md:border-b-0 min-w-0">
               <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Total Paid</p>
-              <p className="text-[#10B981] text-[24px] font-black">₹{paymentSummary.totalPaid.toLocaleString('en-IN')}</p>
+              <p
+                className="text-[#10B981] font-black tabular-nums leading-tight min-w-0 text-[clamp(1rem,2.6vw+0.55rem,1.5rem)] break-words"
+                title={`₹${paymentSummary.totalPaid.toLocaleString("en-IN")}`}
+              >
+                {formatRupeeStatCard(paymentSummary.totalPaid)}
+              </p>
               {paymentSummary.totalPaid === 0 ? (
                 <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">No payments yet</p>
               ) : (
@@ -798,14 +810,24 @@ export default function MemberProfilePage() {
             </div>
 
             {/* CELL 3 */}
-            <div className="pl-4">
+            <div className="md:pl-4 min-w-0">
               <p className="text-[#444444] text-[10px] tracking-widest uppercase mb-1 font-bold">Global Remaining</p>
               {paymentSummary.remaining > 0 ? (
-                <p className="text-[#D11F00] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹{paymentSummary.remaining.toLocaleString('en-IN')}</p>
+                <p
+                  className="text-[#D11F00] font-black leading-tight pb-1.5 pt-0.5 tabular-nums min-w-0 text-[clamp(1rem,2.6vw+0.55rem,1.5rem)] break-words"
+                  title={`₹${paymentSummary.remaining.toLocaleString("en-IN")}`}
+                >
+                  {formatRupeeStatCard(paymentSummary.remaining)}
+                </p>
               ) : paymentSummary.remaining === 0 ? (
-                <p className="text-[#10B981] text-[24px] font-black leading-none pb-1.5 pt-0.5">₹0</p>
+                <p className="text-[#10B981] text-[clamp(1rem,2.6vw+0.55rem,1.5rem)] font-black leading-none pb-1.5 pt-0.5">₹0</p>
               ) : (
-                <p className="text-[#F59E0B] text-[24px] font-black leading-none pb-1.5 pt-0.5">Overpaid ₹{Math.abs(paymentSummary.remaining).toLocaleString('en-IN')}</p>
+                <p
+                  className="text-[#F59E0B] font-black leading-tight pb-1.5 pt-0.5 tabular-nums min-w-0 text-[clamp(0.85rem,2.2vw+0.45rem,1.35rem)] break-words"
+                  title={`Overpaid ₹${Math.abs(paymentSummary.remaining).toLocaleString("en-IN")}`}
+                >
+                  Overpaid {formatRupeeStatCard(Math.abs(paymentSummary.remaining))}
+                </p>
               )}
 
               <div className="mt-1">
@@ -829,23 +851,23 @@ export default function MemberProfilePage() {
                   total ₹{Math.round(paymentSummary.currentPlanAmount).toLocaleString("en-IN")}
                 </p>
               </div>
-              <div className="mt-2 grid grid-cols-3 gap-3">
-                <div className="rounded-lg border border-[#1C1C1C] bg-[#111111] px-3 py-2">
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-lg border border-[#1C1C1C] bg-[#111111] px-3 py-2 min-w-0">
                   <p className="text-[#444444] text-[10px] tracking-widest uppercase font-bold">Total</p>
-                  <p className="text-white text-[14px] font-black">
-                    ₹{Math.round(paymentSummary.currentPlanAmount).toLocaleString("en-IN")}
+                  <p className="text-white text-[clamp(0.75rem,1.8vw+0.35rem,0.875rem)] font-black tabular-nums truncate" title={`₹${Math.round(paymentSummary.currentPlanAmount).toLocaleString("en-IN")}`}>
+                    {formatRupeeStatCard(Math.round(paymentSummary.currentPlanAmount))}
                   </p>
                 </div>
-                <div className="rounded-lg border border-[#10B981]/20 bg-[#10B981]/10 px-3 py-2">
+                <div className="rounded-lg border border-[#10B981]/20 bg-[#10B981]/10 px-3 py-2 min-w-0">
                   <p className="text-[#10B981] text-[10px] tracking-widest uppercase font-bold">Paid</p>
-                  <p className="text-[#10B981] text-[14px] font-black">
-                    ₹{Math.max(0, Math.round(paymentSummary.currentPlanPaid ?? 0)).toLocaleString("en-IN")}
+                  <p className="text-[#10B981] text-[clamp(0.75rem,1.8vw+0.35rem,0.875rem)] font-black tabular-nums truncate" title={`₹${Math.max(0, Math.round(paymentSummary.currentPlanPaid ?? 0)).toLocaleString("en-IN")}`}>
+                    {formatRupeeStatCard(Math.max(0, Math.round(paymentSummary.currentPlanPaid ?? 0)))}
                   </p>
                 </div>
-                <div className="rounded-lg border border-[#D11F00]/20 bg-[#D11F00]/10 px-3 py-2">
+                <div className="rounded-lg border border-[#D11F00]/20 bg-[#D11F00]/10 px-3 py-2 min-w-0">
                   <p className="text-[#D11F00] text-[10px] tracking-widest uppercase font-bold">Due</p>
-                  <p className="text-[#D11F00] text-[14px] font-black">
-                    ₹{Math.max(0, Math.round(paymentSummary.currentPlanRemaining ?? 0)).toLocaleString("en-IN")}
+                  <p className="text-[#D11F00] text-[clamp(0.75rem,1.8vw+0.35rem,0.875rem)] font-black tabular-nums truncate" title={`₹${Math.max(0, Math.round(paymentSummary.currentPlanRemaining ?? 0)).toLocaleString("en-IN")}`}>
+                    {formatRupeeStatCard(Math.max(0, Math.round(paymentSummary.currentPlanRemaining ?? 0)))}
                   </p>
                 </div>
               </div>

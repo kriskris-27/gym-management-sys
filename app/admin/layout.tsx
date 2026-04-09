@@ -96,7 +96,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const endTimer = setTimeout(() => {
       setShowIntro(false)
       sessionStorage.removeItem("show_post_login_intro")
-    }, 6200)
+    }, 8000)
 
     return () => {
       clearTimeout(endTimer)
@@ -117,7 +117,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Show loading while checking authentication
   if (!authChecked) {
     return (
-      <div className="flex bg-[#080808] min-h-screen text-white font-sans items-center justify-center">
+      <div className="flex bg-[#080808] min-h-dvh text-white font-sans items-center justify-center px-4">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#D11F00] mx-auto mb-4"></div>
           <p>Checking authentication...</p>
@@ -127,7 +127,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="flex bg-[#080808] min-h-screen text-white font-sans selection:bg-[#D11F00]/30">
+    <div className="flex bg-[#080808] min-h-dvh text-white font-sans selection:bg-[#D11F00]/30">
       <style>{`
         @keyframes slideInSidebar {
           from { transform: translateX(-240px); opacity: 0; }
@@ -136,30 +136,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         @keyframes introFadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes scrollMaskReveal {
           0% { clip-path: inset(100% 0 0 0); opacity: 0; transform: translateY(40px); }
-          25% { opacity: 1; }
-          58% { clip-path: inset(0 0 0 0); transform: translateY(0); opacity: 1; }
+          20% { opacity: 1; }
+          50% { clip-path: inset(0 0 0 0); transform: translateY(0); opacity: 1; }
           100% { clip-path: inset(0 0 100% 0); transform: translateY(-40px); opacity: 0.2; }
         }
+        /* Opacity-only beat, then one spatial arc (no mid keyframe kinks) */
         @keyframes logoZoomDock {
-          0%, 35% {
+          0% {
             opacity: 0;
-            transform: perspective(2000px) translate3d(0, 0, -2200px) scale(9.5);
-            filter: blur(34px);
+            transform: perspective(2000px) translate3d(0, 0, -2100px) scale(9.2);
+            filter: blur(32px);
           }
-          50% {
+          8% {
             opacity: 1;
-            transform: perspective(2000px) translate3d(0, 0, -800px) scale(6.2);
-            filter: blur(18px);
-          }
-          68% {
-            opacity: 1;
-            transform: perspective(2000px) translate3d(0, 0, -120px) scale(1.7);
-            filter: blur(4px);
-          }
-          85% {
-            opacity: 1;
-            transform: perspective(2000px) translate3d(10vw, 0, 0) scale(1);
-            filter: blur(0px);
+            transform: perspective(2000px) translate3d(0, 0, -2100px) scale(9.2);
+            filter: blur(32px);
           }
           100% {
             opacity: 1;
@@ -168,14 +159,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           }
         }
         @keyframes logoTagIn {
-          0%, 82% { opacity: 0; transform: translate(24vw, 12px); letter-spacing: 0.28em; }
+          0%, 58% { opacity: 0; transform: translate(24vw, 10px); letter-spacing: 0.26em; }
+          82% { opacity: 1; transform: translate(24vw, 3px); letter-spacing: 0.23em; }
           100% { opacity: 1; transform: translate(24vw, 0); letter-spacing: 0.2em; }
         }
         .animate-sidebar { animation: slideInSidebar 0.4s ease-out forwards; }
         .animate-intro-fade { animation: introFadeIn 0.55s ease-out both; }
-        .animate-scroll-mask { animation: scrollMaskReveal 3.1s cubic-bezier(0.19, 1, 0.22, 1) forwards; }
-        .animate-logo-dock { animation: logoZoomDock 4.8s cubic-bezier(0.16, 1, 0.3, 1) 1s forwards; will-change: transform, opacity, filter; }
-        .animate-logo-label { animation: logoTagIn 4.8s cubic-bezier(0.22, 1, 0.36, 1) 1s forwards; }
+        .animate-scroll-mask { animation: scrollMaskReveal 2.5s cubic-bezier(0.33, 0.86, 0.36, 1) forwards; }
+        .animate-logo-dock { animation: logoZoomDock 6.75s cubic-bezier(0.18, 0.92, 0.32, 1) 0.4s forwards; will-change: transform, opacity, filter; }
+        .animate-logo-label { animation: logoTagIn 6.75s cubic-bezier(0.18, 0.92, 0.32, 1) 0.4s forwards; }
       `}</style>
 
       {showIntro && (
@@ -213,10 +205,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {!showIntro && (
         <>
           {/* MOBILE HAMBURGER */}
-          <div className="md:hidden fixed top-4 left-4 z-50">
+          <div className="md:hidden fixed z-50 top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))]">
             <button
+              type="button"
               onClick={() => setSidebarOpen(true)}
-              className="p-2 bg-[#111111] border border-[#1C1C1C] rounded-lg text-[#555555] hover:text-[#D11F00] transition-colors"
+              aria-label="Open menu"
+              className="min-h-11 min-w-11 flex items-center justify-center bg-[#111111] border border-[#1C1C1C] rounded-xl text-[#555555] hover:text-[#D11F00] active:scale-[0.97] transition-all duration-200"
             >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="3" y1="12" x2="21" y2="12" />
@@ -236,8 +230,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           {/* SIDEBAR */}
           <aside className={`
-            fixed left-0 top-0 h-full w-[240px] bg-[#0D0D0D] border-r border-[#1C1C1C] flex flex-col justify-between py-6 z-50
-            transition-transform duration-300 md:translate-x-0 animate-sidebar
+            fixed left-0 top-0 h-dvh min-h-dvh w-[min(88vw,280px)] md:w-[240px] lg:w-[260px] bg-[#0D0D0D] border-r border-[#1C1C1C] flex flex-col justify-between py-6 z-50
+            pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]
+            transition-transform duration-300 ease-out md:translate-x-0 animate-sidebar
             ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
           `}>
             {/* TOP: Logo */}
@@ -267,7 +262,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     href={item.path}
                     onClick={() => setSidebarOpen(false)}
                     className={`
-                      flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group
+                      flex items-center gap-3 px-3 py-3 min-h-11 rounded-xl transition-all duration-200 group active:scale-[0.99]
                       ${active
                         ? "text-white font-semibold bg-[#1C1C1C] border-l-2 border-[#D11F00] pl-[10px]"
                         : "text-[#444444] hover:text-[#888888] hover:bg-[#1C1C1C]"}
@@ -311,7 +306,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </aside>
 
           {/* MAIN CONTENT */}
-          <main className="flex-1 md:ml-[240px] min-h-screen bg-[#080808] overflow-y-auto">
+          <main className="flex-1 min-w-0 md:ml-[240px] lg:ml-[260px] min-h-dvh bg-[#080808] overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
             {children}
           </main>
         </>

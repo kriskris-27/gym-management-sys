@@ -6,6 +6,8 @@ import { useMonthlyReport } from "@/hooks/useReports"
 import { DateTime } from "luxon"
 import { GYM_TIMEZONE, gymNow } from "@/lib/gym-datetime"
 import SpeedLoader from "@/app/components/SpeedLoader"
+import { adminPageLoadingClass, adminPageShellClass } from "@/app/components/admin-page-shell"
+import { formatRupeeStatCard, statCountClass, statRupeeClass } from "@/lib/utils"
 
 function currentISTYear() {
   return gymNow().year
@@ -324,7 +326,7 @@ export default function AdminReportsPage() {
 
   if (isError && !isLoading) {
     return (
-      <div className="min-h-screen w-full bg-[#080808] p-8">
+      <div className={adminPageShellClass}>
         <p className="text-[14px] text-[#666666]">
           Could not load report. Try again later.
         </p>
@@ -334,7 +336,7 @@ export default function AdminReportsPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen w-full bg-[#080808] p-8 flex flex-col items-center justify-center gap-3">
+      <div className={adminPageLoadingClass}>
         <SpeedLoader />
         <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading reports</p>
       </div>
@@ -342,7 +344,7 @@ export default function AdminReportsPage() {
   }
 
   return (
-    <div className="min-h-screen w-full animate-[pageFade_0.4s_ease-out] bg-[#080808] p-8">
+    <div className={`${adminPageShellClass} animate-[pageFade_0.4s_ease-out]`}>
       <style>{`
         @keyframes pageFade {
           from { opacity: 0; }
@@ -399,17 +401,17 @@ export default function AdminReportsPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">CASH COLLECTED</p>
-              <p className="mt-2 text-[32px] font-black text-white">₹{(data?.revenue.total ?? 0).toLocaleString("en-IN")}</p>
+              <p className={`mt-2 font-black text-white ${statRupeeClass}`}>{formatRupeeStatCard(data?.revenue.total ?? 0)}</p>
               <p className="mt-1 text-[12px] text-[#10B981] font-medium">From {data?.revenue.dailyBreakdown.reduce((s, b) => s + b.count, 0)} transactions</p>
               {(data?.revenue.carryOverCollected ?? 0) > 0 && (
                 <p className="mt-1 text-[11px] text-[#F59E0B]">
@@ -419,17 +421,17 @@ export default function AdminReportsPage() {
             </div>
           </div>
         </div>
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">TOTAL SALES</p>
-              <p className="mt-2 text-[32px] font-black text-[#F59E0B]">
-                ₹{(data?.revenue.collectedForCurrentMonthSales ?? 0).toLocaleString("en-IN")}
+              <p className={`mt-2 font-black text-[#F59E0B] ${statRupeeClass}`}>
+                {formatRupeeStatCard(data?.revenue.collectedForCurrentMonthSales ?? 0)}
               </p>
               <p className="mt-1 text-[11px] text-[#c9c9c9]">
                 Total sales: ₹{(data?.revenue.expectedTotal ?? 0).toLocaleString("en-IN")}
@@ -447,76 +449,76 @@ export default function AdminReportsPage() {
             </div>
           </div>
         </div>
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">DISCOUNT GIVEN</p>
-              <p className="mt-2 text-[32px] font-black text-[#10B981]">₹{(data?.revenue.discountTotal ?? 0).toLocaleString("en-IN")}</p>
+              <p className={`mt-2 font-black text-[#10B981] ${statRupeeClass}`}>{formatRupeeStatCard(data?.revenue.discountTotal ?? 0)}</p>
               <p className="mt-1 text-[12px] text-[#c9c9c9]">for selected month sales</p>
             </div>
           </div>
         </div>
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">CARRY-OVER COLLECTED</p>
-              <p className="mt-2 text-[32px] font-black text-[#A78BFA]">
-                ₹{(data?.revenue.carryOverCollected ?? 0).toLocaleString("en-IN")}
+              <p className={`mt-2 font-black text-[#A78BFA] ${statRupeeClass}`}>
+                {formatRupeeStatCard(data?.revenue.carryOverCollected ?? 0)}
               </p>
               <p className="mt-1 text-[12px] text-[#c9c9c9]">paid this month for older plan dues</p>
             </div>
           </div>
         </div>
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">NEW MEMBERS</p>
-              <p className="mt-2 text-[32px] font-black text-white">{data?.members.newThisMonth ?? 0}</p>
+              <p className={`mt-2 font-black text-white ${statCountClass}`}>{data?.members.newThisMonth ?? 0}</p>
               <p className="mt-1 text-[12px] text-[#c9c9c9]">{(data?.members.renewalsThisMonth ?? 0).toLocaleString("en-IN")} renewals</p>
             </div>
           </div>
         </div>
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">TOTAL SESSIONS</p>
-              <p className="mt-2 text-[32px] font-black text-white">{data?.attendance.totalSessions ?? 0}</p>
+              <p className={`mt-2 font-black text-white ${statCountClass}`}>{data?.attendance.totalSessions ?? 0}</p>
               <p className="mt-1 text-[12px] text-[#c9c9c9]">{data?.attendance.uniqueMembers ?? 0} unique members</p>
             </div>
           </div>
         </div>
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">
                 AVG SESSION
               </p>
-              <p className="mt-2 text-[32px] font-black text-white">
+              <p className="mt-2 font-black text-white tabular-nums leading-tight min-w-0 text-[clamp(1rem,3.8vw+0.5rem,1.75rem)] break-words">
                 {avgSessionDisplay}
               </p>
               <p className="mt-1 text-[12px] text-[#c9c9c9]">per visit</p>

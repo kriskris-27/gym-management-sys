@@ -10,6 +10,12 @@ import {
   GYM_TIMEZONE,
 } from "@/lib/gym-datetime"
 import SpeedLoader from "@/app/components/SpeedLoader"
+import { adminPageShellClass } from "@/app/components/admin-page-shell"
+import {
+  formatRupeeStatCard,
+  statCountClass,
+  statRupeeClass,
+} from "@/lib/utils"
 
 interface Member {
   id: string
@@ -73,7 +79,7 @@ export default function DashboardPage() {
   }, [todayDate])
 
   return (
-    <div className="w-full min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30 overflow-x-hidden">
+    <div className={adminPageShellClass}>
       <style>{`
         @keyframes fadeUp {
           from { transform: translateY(16px); opacity: 0; }
@@ -113,7 +119,7 @@ export default function DashboardPage() {
       ) : data ? (
         <>
           {/* STAT CARDS ROW */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
             {/* Card 1 */}
             <div className="themeFxCardOuter animate-fadeUp [animation-delay:0.1s] opacity-0">
               <div className="themeFxCard">
@@ -122,12 +128,12 @@ export default function DashboardPage() {
                 <div className="themeFxCardLine themeFxCardLineBottom" />
                 <div className="themeFxCardLine themeFxCardLineLeft" />
                 <div className="themeFxCardLine themeFxCardLineRight" />
-                <div className="relative z-10">
+                <div className="relative z-10 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-3">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D11F00" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <h3 className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold">Present Today</h3>
                   </div>
-                  <div className="text-white text-[40px] font-black leading-none mb-1">{data.today.totalPresent}</div>
+                  <div className={`text-white font-black mb-1 ${statCountClass}`}>{data.today.totalPresent}</div>
                   <p className="text-[#c9c9c9] text-[11px] font-medium uppercase tracking-wider">members checked in</p>
                 </div>
               </div>
@@ -141,13 +147,13 @@ export default function DashboardPage() {
                 <div className="themeFxCardLine themeFxCardLineBottom" />
                 <div className="themeFxCardLine themeFxCardLineLeft" />
                 <div className="themeFxCardLine themeFxCardLineRight" />
-                <div className="relative z-10">
+                <div className="relative z-10 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-3">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={data.today.currentlyInside > 0 ? "#D11F00" : "#555555"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                     <h3 className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold">Inside Now</h3>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-white text-[40px] font-black leading-none mb-1">{data.today.currentlyInside}</div>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`text-white font-black mb-1 ${statCountClass}`}>{data.today.currentlyInside}</div>
                     {data.today.currentlyInside > 0 && (
                       <div className="w-1.5 h-1.5 bg-[#D11F00] rounded-full dot-pulse -mt-2" />
                     )}
@@ -165,13 +171,13 @@ export default function DashboardPage() {
                 <div className="themeFxCardLine themeFxCardLineBottom" />
                 <div className="themeFxCardLine themeFxCardLineLeft" />
                 <div className="themeFxCardLine themeFxCardLineRight" />
-                <div className="relative z-10">
+                <div className="relative z-10 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-3">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                     <h3 className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold">Active Members</h3>
                   </div>
-                  <div className="text-white text-[40px] font-black leading-none mb-1">{data.members.active}</div>
-                  <p className="text-[#c9c9c9] text-[11px] font-medium uppercase tracking-wider">{data.members.total} total registered</p>
+                  <div className={`text-white font-black mb-1 ${statCountClass}`}>{data.members.active}</div>
+                  <p className="text-[#c9c9c9] text-[11px] font-medium uppercase tracking-wider truncate">{data.members.total} total registered</p>
                 </div>
               </div>
             </div>
@@ -184,13 +190,13 @@ export default function DashboardPage() {
                 <div className="themeFxCardLine themeFxCardLineBottom" />
                 <div className="themeFxCardLine themeFxCardLineLeft" />
                 <div className="themeFxCardLine themeFxCardLineRight" />
-                <div className="relative z-10">
+                <div className="relative z-10 min-w-0 w-full">
                   <div className="flex items-center gap-2 mb-3">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                     <h3 className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold">This Month</h3>
                   </div>
-                  <div className="text-white text-[40px] font-black leading-none mb-1">
-                    ₹{data.payments.thisMonth.toLocaleString('en-IN')}
+                  <div className={`text-white font-black mb-1 ${statRupeeClass}`}>
+                    {formatRupeeStatCard(data.payments.thisMonth)}
                   </div>
                   <p className="text-[#c9c9c9] text-[11px] font-medium uppercase tracking-wider">{data.payments.thisMonthCount} transactions</p>
                 </div>

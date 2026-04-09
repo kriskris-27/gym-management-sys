@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect } from "react"
 import SpeedLoader from "@/app/components/SpeedLoader"
+import { adminPageLoadingClass, adminPageShellClass } from "@/app/components/admin-page-shell"
 // lucide-react removed
 
 
@@ -184,7 +185,7 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+      <div className={adminPageLoadingClass}>
         <SpeedLoader />
         <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading settings</p>
       </div>
@@ -192,7 +193,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#080808] p-8 animate-in fade-in duration-400">
+    <div className={`${adminPageShellClass} animate-in fade-in duration-400`}>
       <div className="mb-8">
         <h1 className="text-[28px] font-black text-white">Settings</h1>
         <p className="text-[13px] text-[#444444] mt-1">Manage gym details, security, and pricing</p>
@@ -200,7 +201,7 @@ export default function SettingsPage() {
 
      
 
-      <div className="max-w-[560px] bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 mb-5">
+      <div className="w-full max-w-[min(100%,560px)] mx-auto bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 sm:p-6 mb-5">
         <div className="themeFxCardOuter max-w-[300px] h-[250px]">
           <div className="themeFxCard h-[248px] flex items-center justify-center flex-col">
             <div className="themeFxCardRay" />
@@ -214,7 +215,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="max-w-[560px] bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 mb-5">
+      <div className="w-full max-w-[min(100%,560px)] mx-auto bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 sm:p-6 mb-5">
         <button
           type="button"
           onClick={() => setOpenSection((prev) => (prev === "GYM_DETAILS" ? null : "GYM_DETAILS"))}
@@ -274,7 +275,7 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <div className="max-w-[560px] bg-[#111111] border border-[#1C1C1C] rounded-xl p-6 mb-5">
+      <div className="w-full max-w-[min(100%,560px)] mx-auto bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 sm:p-6 mb-5">
         <button
           type="button"
           onClick={() => setOpenSection((prev) => (prev === "CHANGE_PASSWORD" ? null : "CHANGE_PASSWORD"))}
@@ -335,7 +336,7 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <div className="max-w-[560px] bg-[#111111] border border-[#1C1C1C] rounded-xl p-6">
+      <div className="w-full max-w-[min(100%,560px)] mx-auto bg-[#111111] border border-[#1C1C1C] rounded-xl p-5 sm:p-6">
         <button
           type="button"
           onClick={() => setOpenSection((prev) => (prev === "PLAN_PRICING" ? null : "PLAN_PRICING"))}

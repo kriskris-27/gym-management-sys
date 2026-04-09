@@ -102,10 +102,10 @@ export default function LoginPage() {
         .animate-spin-custom { animation: spin 1s linear infinite; }
       `}</style>
 
-      <div className="min-h-screen bg-[#080808] grid grid-cols-1 md:grid-cols-2 text-white font-sans selection:bg-[#D11F00]/30">
+      <div className="min-h-dvh bg-[#080808] grid grid-cols-1 md:grid-cols-2 text-white font-sans selection:bg-[#D11F00]/30 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1rem,env(safe-area-inset-bottom))]">
         
         {/* LEFT COLUMN */}
-        <div className="hidden md:flex flex-col justify-between p-12 border-right border-[#1C1C1C] animate-slideInLeft border-r-[1px]">
+        <div className="hidden md:flex flex-col justify-between p-8 lg:p-12 pt-[max(2rem,env(safe-area-inset-top))] border-right border-[#1C1C1C] animate-slideInLeft border-r-[1px]">
           {/* TOP: Logo row */}
           <div className="flex items-center gap-3">
             <Image
@@ -123,7 +123,7 @@ export default function LoginPage() {
 
           {/* MIDDLE: Hero */}
           <div className="flex flex-col">
-            <div className="flex flex-col uppercase font-black tracking-tight leading-[0.92] text-[72px]">
+            <div className="flex flex-col uppercase font-black tracking-tight leading-[0.92] text-[clamp(2.5rem,6vw,4.5rem)]">
               <span className="animate-slideInBottom [animation-delay:0.2s]">Train</span>
               <span className="animate-slideInBottom [animation-delay:0.3s]">Harder.</span>
               <span className="animate-slideInBottom [animation-delay:0.4s]">Manage</span>
@@ -151,7 +151,7 @@ export default function LoginPage() {
         </div>
 
         {/* MOBILE LOGO DISPLAY */}
-        <div className="flex md:hidden flex-col p-8 gap-6 animate-slideInLeft">
+        <div className="flex md:hidden flex-col pt-[max(1.5rem,env(safe-area-inset-top))] px-4 pb-4 gap-6 animate-slideInLeft">
           <div className="flex items-center gap-3">
             <Image
               src="/logo.png"
@@ -174,8 +174,8 @@ export default function LoginPage() {
         </div>
 
         {/* RIGHT COLUMN */}
-        <div className="flex flex-col justify-center items-center p-8 md:p-12 animate-slideInRight">
-          <div className="max-w-[360px] w-full">
+        <div className="flex flex-col justify-center items-center py-8 px-4 md:p-10 lg:p-12 animate-slideInRight min-h-[50dvh] md:min-h-0">
+          <div className="max-w-[min(100%,420px)] w-full">
             <div className="animate-fadeInUp [animation-delay:0.3s]">
               <span className="text-[#D11F00] text-[10px] font-bold tracking-[0.2em] uppercase block mb-6">
                 Owner Access
@@ -242,7 +242,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className={`w-full bg-[#D11F00] hover:bg-[#B51A00] text-white font-black text-[13px] tracking-[0.1em] uppercase py-4 rounded-[10px] mt-2 transition-all duration-200 active:scale-[0.98] flex items-center justify-center ${loading ? "opacity-70 cursor-not-allowed" : "cursor-pointer"} animate-fadeInUp [animation-delay:0.6s]`}
+                className={`w-full min-h-12 bg-[#D11F00] hover:bg-[#B51A00] text-white font-black text-[13px] tracking-[0.1em] uppercase py-3.5 rounded-[10px] mt-2 transition-all duration-200 active:scale-[0.98] flex items-center justify-center touch-manipulation ${loading ? "opacity-70 cursor-not-allowed" : "cursor-pointer"} animate-fadeInUp [animation-delay:0.6s]`}
               >
                 {loading ? (
                   <div className="flex items-center gap-2">

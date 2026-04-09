@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Barlow, Geist_Mono, Teko } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -39,6 +39,12 @@ export const metadata: Metadata = {
   manifest: '/manifest.json',
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -52,9 +58,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${gymSans.variable} ${geistMono.variable} ${gymDisplay.variable} h-full antialiased`}
+      className={`${gymSans.variable} ${geistMono.variable} ${gymDisplay.variable} h-full min-h-dvh overflow-x-hidden antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-dvh flex flex-col overflow-x-hidden touch-manipulation">
         <Providers>{children}</Providers>
       </body>
     </html>

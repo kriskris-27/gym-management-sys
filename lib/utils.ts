@@ -180,3 +180,37 @@ export async function withRetry<T>(
     throw error
   }
 }
+
+/**
+ * Compact ₹ string for small stat cards so long amounts don’t overflow.
+ * Below 10k uses grouped locale; above uses k / L / Cr.
+ */
+export function formatRupeeStatCard(amount: number): string {
+  const v = Math.round(Math.max(0, amount))
+  if (v >= 10000000) {
+    const cr = v / 10000000
+    return `₹${cr % 1 === 0 ? cr.toFixed(0) : cr.toFixed(1)}Cr`
+  }
+  if (v >= 100000) {
+    const l = v / 100000
+    return `₹${l % 1 === 0 ? l.toFixed(0) : l.toFixed(1)}L`
+  }
+  if (v >= 10000) {
+    return `₹${Math.round(v / 1000)}k`
+  }
+  return `₹${v.toLocaleString("en-IN")}`
+}
+
+/** Same as formatRupeeStatCard but allows negative (e.g. overpaid). */
+export function formatRupeeStatCardSigned(amount: number): string {
+  if (amount < 0) return `−${formatRupeeStatCard(-amount)}`
+  return formatRupeeStatCard(amount)
+}
+
+/** Tailwind classes: responsive numeric stats in cards (counts, etc.). */
+export const statCountClass =
+  "tabular-nums tracking-tight min-w-0 max-w-full text-[clamp(1.35rem,4.5vw+0.65rem,2.5rem)] leading-none"
+
+/** Tailwind classes: rupee lines in tight cards. */
+export const statRupeeClass =
+  "tabular-nums tracking-tight min-w-0 w-full max-w-full text-[clamp(1.1rem,3.8vw+0.55rem,2.25rem)] leading-[1.1] break-words"

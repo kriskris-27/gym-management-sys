@@ -7,6 +7,8 @@ import { usePayments } from "@/hooks/usePayments"
 import { firstDayOfMonthYmdInGym, todayYmdInIST } from "@/lib/gym-datetime"
 import type { MemberFinancials } from "@/lib/financial-service"
 import SpeedLoader from "@/app/components/SpeedLoader"
+import { adminPageLoadingClass, adminPageShellClass } from "@/app/components/admin-page-shell"
+import { formatRupeeStatCard, statRupeeClass } from "@/lib/utils"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -97,7 +99,7 @@ export default function PaymentsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#080808] p-8 text-white flex flex-col items-center justify-center gap-3">
+      <div className={adminPageLoadingClass}>
         <SpeedLoader />
         <p className="text-[#666666] text-[12px] tracking-wider uppercase">Loading payments</p>
       </div>
@@ -239,7 +241,7 @@ export default function PaymentsPage() {
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#080808] p-8 text-white font-sans selection:bg-[#D11F00]/30">
+    <div className={adminPageShellClass}>
       <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
@@ -262,22 +264,22 @@ export default function PaymentsPage() {
       </div>
 
       {/* ── STAT CARDS ── */}
-      <div className="grid grid-cols-3 gap-4 mt-6 animate-page">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6 animate-page">
         {/* Selected Range */}
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">Selected Range</p>
               {loading ? (
                 <div className="bg-[#1C1C1C] h-9 w-28 rounded animate-pulse mb-2" />
               ) : (
-                <p className="text-white text-[32px] font-black leading-none">
-                  ₹{rangeTotal.toLocaleString("en-IN")}
+                <p className={`text-white font-black ${statRupeeClass}`}>
+                  {formatRupeeStatCard(rangeTotal)}
                 </p>
               )}
               <p className="text-[#c9c9c9] text-[11px] mt-2">{loading ? "—" : `${rangeCount} transactions`}</p>
@@ -286,14 +288,14 @@ export default function PaymentsPage() {
         </div>
 
         {/* By Mode */}
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px] sm:min-h-[132px]">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">By Mode</p>
               {loading ? (
                 <div className="space-y-2">
@@ -301,17 +303,17 @@ export default function PaymentsPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#c9c9c9] text-[12px]">Cash</span>
-                    <span className="text-[#10B981] text-[12px] font-medium">₹{cashTotal.toLocaleString("en-IN")}</span>
+                  <div className="flex justify-between items-center gap-2 min-w-0">
+                    <span className="text-[#c9c9c9] text-[12px] shrink-0">Cash</span>
+                    <span className="text-[#10B981] text-[11px] sm:text-[12px] font-medium tabular-nums text-right min-w-0 truncate">{formatRupeeStatCard(cashTotal)}</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#c9c9c9] text-[12px]">UPI</span>
-                    <span className="text-[#3B82F6] text-[12px] font-medium">₹{upiTotal.toLocaleString("en-IN")}</span>
+                  <div className="flex justify-between items-center gap-2 min-w-0">
+                    <span className="text-[#c9c9c9] text-[12px] shrink-0">UPI</span>
+                    <span className="text-[#3B82F6] text-[11px] sm:text-[12px] font-medium tabular-nums text-right min-w-0 truncate">{formatRupeeStatCard(upiTotal)}</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#c9c9c9] text-[12px]">Card</span>
-                    <span className="text-[#8B5CF6] text-[12px] font-medium">₹{cardTotal.toLocaleString("en-IN")}</span>
+                  <div className="flex justify-between items-center gap-2 min-w-0">
+                    <span className="text-[#c9c9c9] text-[12px] shrink-0">Card</span>
+                    <span className="text-[#8B5CF6] text-[11px] sm:text-[12px] font-medium tabular-nums text-right min-w-0 truncate">{formatRupeeStatCard(cardTotal)}</span>
                   </div>
                 </div>
               )}
@@ -320,20 +322,20 @@ export default function PaymentsPage() {
         </div>
 
         {/* Filtered Total */}
-        <div className="themeFxCardOuter h-[132px]">
-          <div className="themeFxCard h-[130px]">
+        <div className="themeFxCardOuter min-h-[120px] sm:col-span-2 lg:col-span-1">
+          <div className="themeFxCard">
             <div className="themeFxCardRay" />
             <div className="themeFxCardLine themeFxCardLineTop" />
             <div className="themeFxCardLine themeFxCardLineBottom" />
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
-            <div className="relative z-10">
+            <div className="relative z-10 min-w-0 w-full">
               <p className="text-[#b9b9b9] text-[10px] tracking-widest uppercase font-bold mb-3">Filtered Total</p>
               {loading ? (
                 <div className="bg-[#1C1C1C] h-9 w-28 rounded animate-pulse mb-2" />
               ) : (
-                <p className="text-white text-[32px] font-black leading-none">
-                  ₹{allTimeTotal.toLocaleString("en-IN")}
+                <p className={`text-white font-black ${statRupeeClass}`}>
+                  {formatRupeeStatCard(allTimeTotal)}
                 </p>
               )}
               <p className="text-[#c9c9c9] text-[11px] mt-2">{loading ? "—" : `${validPaymentsCount} total transactions`}</p>
