@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useMembers } from "@/hooks/useMembers"
 import { useRestoreMember } from "@/hooks/useRestoreMember"
 import SpeedLoader from "@/app/components/SpeedLoader"
+import { formatMemberDate } from "@/lib/gym-datetime"
 
 interface Member {
   id: string
@@ -73,11 +74,8 @@ export default function MembersPage() {
 
   // Date Helpers
   const formatDate = (dateStr: string) => {
-    if (!dateStr) return "-";
-    const datePart = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr.split(" ")[0];
-    const [year, month, day] = datePart.split("-");
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    return `${parseInt(day)} ${months[parseInt(month) - 1]} ${year}`;
+    if (!dateStr) return "-"
+    return formatMemberDate(dateStr)
   }
 
   const getDaysDiff = (endDateStr: string) => {

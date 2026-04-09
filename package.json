@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "pnpm dlx prisma@5.22.0 generate && next build",
+    "postinstall": "prisma generate",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
@@ -30,9 +31,11 @@
     "react-dom": "19.2.4",
     "react-hook-form": "^7.71.2",
     "recharts": "^3.8.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.0",
     "@prisma/adapter-neon": "5.22.0",
     "@prisma/client": "^5.22.0",
     "@tailwindcss/postcss": "^4",
@@ -52,7 +55,6 @@
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^3.2.4",
-    "ws": "^8.19.0",
-    "@playwright/test": "^1.56.0"
+    "ws": "^8.19.0"
   }
 }

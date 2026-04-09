@@ -1,4 +1,22 @@
 import { z } from "zod";
+import { coerceStartOfGymCalendarDay } from "@/lib/gym-datetime";
+
+const zodCoerceGymDayRequired = z.preprocess(
+  (val) => {
+    const d = coerceStartOfGymCalendarDay(val)
+    return d ?? val
+  },
+  z.date()
+);
+
+const zodCoerceGymDayOptional = z.preprocess(
+  (val) => {
+    if (val === undefined || val === null || val === "") return undefined
+    const d = coerceStartOfGymCalendarDay(val)
+    return d !== null ? d : val
+  },
+  z.coerce.date().optional()
+);
 
 /**
  * Common Security Regex
@@ -49,8 +67,8 @@ export const MemberCreateSchema = z.object({
   phone: z.string()
     .regex(PHONE_REGEX, "Invalid Indian mobile number (Must be 10 digits starting with 6-9)"),
   membershipType: MembershipTypeEnum,
-  startDate: z.coerce.date(),
-  endDate: z.coerce.date().optional(),
+  startDate: zodCoerceGymDayRequired,
+  endDate: zodCoerceGymDayOptional,
   discountAmount: z.preprocess(
     (val) => {
       if (val === "" || val === null || val === undefined) return 0
@@ -118,8 +136,8 @@ export const MemberUpdateSchema = z.object({
     .regex(PHONE_REGEX, "Invalid Indian mobile number")
     .optional(),
   membershipType: MembershipTypeEnum.optional(),
-  startDate: z.coerce.date().optional(),
-  endDate: z.coerce.date().optional(),
+  startDate: zodCoerceGymDayOptional,
+  endDate: zodCoerceGymDayOptional,
   status: z.literal("DELETED").optional(),
   discountAmount: z.preprocess(
     (val) => (val === "" || val === null || val === undefined) ? 0 : Number(val),

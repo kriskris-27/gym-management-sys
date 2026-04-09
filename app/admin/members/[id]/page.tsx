@@ -14,6 +14,8 @@ import {
   formatMemberDate,
   formatMemberTime,
   getMembershipDayInfo,
+  gymYmdFromInstant,
+  parseGymDateOnly,
   todayYmdInIST,
 } from "@/lib/gym-datetime"
 
@@ -370,8 +372,8 @@ export default function MemberProfilePage() {
         name: member.name,
         phone: member.phone,
         membershipType: member.membershipType,
-        startDate: member.startDate ? (typeof member.startDate === 'string' ? member.startDate.split('T')[0] : member.startDate.toISOString().split('T')[0]) : getTodayStr(),
-        endDate: member.endDate ? (typeof member.endDate === 'string' ? member.endDate.split('T')[0] : member.endDate.toISOString().split('T')[0]) : "",
+        startDate: member.startDate ? gymYmdFromInstant(member.startDate) || getTodayStr() : getTodayStr(),
+        endDate: member.endDate ? gymYmdFromInstant(member.endDate) : "",
       })
     }
   }, [member, showEditModal, resetEdit])
@@ -380,12 +382,12 @@ export default function MemberProfilePage() {
   const editStartDate = watchEdit("startDate")
   useEffect(() => {
     if (editMembershipType !== "OTHERS" && editStartDate) {
-      const start = new Date(editStartDate)
-      if (!isNaN(start.getTime())) {
+      const start = parseGymDateOnly(editStartDate)
+      if (start?.isValid) {
         const durations: Record<string, number> = { MONTHLY: 30, QUARTERLY: 90, HALF_YEARLY: 180, ANNUAL: 365 }
         const days = durations[editMembershipType] || 30
-        const end = new Date(start.getTime() + days * 24 * 60 * 60 * 1000)
-        setEditVal("endDate", end.toISOString().split("T")[0])
+        const end = start.plus({ days })
+        setEditVal("endDate", end.toFormat("yyyy-LL-dd"))
       }
     }
   }, [editStartDate, editMembershipType, setEditVal])
@@ -434,13 +436,12 @@ export default function MemberProfilePage() {
 
   useEffect(() => {
     if (renewalMembershipType !== "OTHERS" && renewalStartDate) {
-      const start = new Date(renewalStartDate)
-      if (!isNaN(start.getTime())) {
+      const start = parseGymDateOnly(renewalStartDate)
+      if (start?.isValid) {
         const durations: Record<string, number> = { MONTHLY: 30, QUARTERLY: 90, HALF_YEARLY: 180, ANNUAL: 365 }
         const days = durations[renewalMembershipType as keyof typeof durations] || 30
-        const end = new Date(start)
-        end.setDate(start.getDate() + days)
-        setCalculatedEndDate(end.toISOString().split("T")[0])
+        const end = start.plus({ days })
+        setCalculatedEndDate(end.toFormat("yyyy-LL-dd"))
       }
     }
   }, [renewalMembershipType, renewalStartDate])
@@ -450,8 +451,7 @@ export default function MemberProfilePage() {
       setCalculatedEndDate("")
       const toYmd = (d: string | Date | null | undefined) => {
         if (!d) return getTodayStr()
-        if (typeof d === "string") return d.includes("T") ? d.split("T")[0] : d.split(" ")[0]
-        return d.toISOString().split("T")[0]
+        return gymYmdFromInstant(d) || getTodayStr()
       }
       resetRenewal({
         membershipType:

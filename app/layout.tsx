@@ -44,8 +44,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Background DB warm-up on every page load
-  pingDB();
+  // Skip during CI / Vercel build so static prerender does not open Neon (timeouts / cold DB).
+  if (!process.env.CI) {
+    void pingDB()
+  }
 
   return (
     <html

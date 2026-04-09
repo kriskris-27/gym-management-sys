@@ -3,6 +3,8 @@ import prisma from "@/lib/prisma"
 import { fromDate, calcDuration } from "@/lib/utils"
 import { DateTime } from "luxon"
 
+export const maxDuration = 60
+
 /**
  * Default gym closing time (22:00 IST = 10 PM)
  * Used when no custom setting exists

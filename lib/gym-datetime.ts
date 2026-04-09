@@ -151,6 +151,53 @@ export function parseGymDateOnly(ymd: string): DateTime | null {
   return d.isValid ? d : null
 }
 
+/**
+ * Calendar `YYYY-MM-DD` in the gym zone for an instant (for `<input type="date">`).
+ * Avoids `.split("T")[0]` on ISO strings, which is the **UTC** date and can be one day early in IST.
+ */
+export function gymYmdFromInstant(value: Date | string | null | undefined): string {
+  if (value == null || value === "") return ""
+  const d = toGymZoned(value)
+  return d ? d.toFormat("yyyy-LL-dd") : ""
+}
+
+/**
+ * Normalize subscription calendar inputs to **start of that calendar day in the gym zone** (JS Date = correct UTC instant).
+ * Accepts `YYYY-MM-DD`, full ISO strings, or Date — fixes UTC-midnight vs IST confusion.
+ */
+export function coerceStartOfGymCalendarDay(val: unknown): Date | null {
+  if (val === undefined || val === null) return null
+  if (typeof val === "string") {
+    const t = val.trim()
+    if (t === "") return null
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+      const d = parseGymDateOnly(t)
+      return d ? d.toJSDate() : null
+    }
+    const p = DateTime.fromISO(t, { zone: "utc" })
+    if (!p.isValid) return null
+    return p.setZone(GYM_TIMEZONE).startOf("day").toJSDate()
+  }
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null
+    const z = toGymZoned(val)
+    if (!z || !z.isValid) return null
+    return z.startOf("day").toJSDate()
+  }
+  if (typeof val === "number" && Number.isFinite(val)) {
+    return coerceStartOfGymCalendarDay(new Date(val))
+  }
+  return null
+}
+
+/** Luxon DateTime at gym start-of-day from the same rules as `coerceStartOfGymCalendarDay`. */
+export function luxonStartOfGymDayFromInput(val: unknown): DateTime | null {
+  const js = coerceStartOfGymCalendarDay(val)
+  if (!js) return null
+  const z = DateTime.fromJSDate(js, { zone: "utc" }).setZone(GYM_TIMEZONE)
+  return z.isValid ? z : null
+}
+
 /** Long weekday label for a gym calendar day, e.g. "Wednesday, 8 April 2026". */
 export function formatGymDateLong(dt: DateTime): string {
   return dt.setZone(GYM_TIMEZONE).toFormat("cccc, d LLLL yyyy")

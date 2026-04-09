@@ -4,15 +4,14 @@ import { getISTDateRange } from "@/lib/utils"
 import { computeGlobalMemberLedger } from "@/domain/payment"
 import { DateTime } from "luxon"
 
-/**
- * POST: Daily Automation Job (Expiry Reminders & Inactivity Nudges)
- * Logic: Strictly authenticated by CRON_SECRET. Runs two distinct parallel automation workflows.
- */
-export async function POST(request: Request) {
-  // 1. SECURITY CHECK (ENFORCED FIRST)
+/** Pro / higher plans allow longer runs; Hobby caps lower. */
+export const maxDuration = 60
+
+/** Vercel Cron invokes GET; manual runs may use POST. Both require CRON_SECRET. */
+function verifyCronAuth(request: Request): NextResponse | null {
   const authHeader = request.headers.get("authorization")
   const cronSecret = process.env.CRON_SECRET
-  
+
   if (!cronSecret) {
     console.error("❌ CRON_SECRET is missing from environment!")
     return NextResponse.json({ error: "Server Configuration Error" }, { status: 500 })
@@ -22,6 +21,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  return null
+}
+
+/**
+ * Daily job: (1) WhatsApp-style expiry reminders — subscriptions ending in 5 days and in 1 day;
+ * (2) inactivity nudge — active members with no check-in in 4 days (or never visited & account >4d old).
+ * Expiry: always reminds to renew; if ledger shows due > 0, also asks to clear pending dues. Dedupes via NotificationLog.
+ */
+async function runNotifyJob(): Promise<NextResponse> {
   const now = new Date()
   const { startOfTodayIST } = getISTDateRange()
   const startOfToday = DateTime.isDateTime(startOfTodayIST)
@@ -69,7 +77,7 @@ export async function POST(request: Request) {
 
         const ledger = await computeGlobalMemberLedger(m.id)
         const dueAmount = Math.max(0, Math.round(ledger.remaining))
-        if (dueAmount > 1) stats.withPendingDue.tagged++
+        if (dueAmount > 0) stats.withPendingDue.tagged++
 
         const ok = await sendWhatsAppStub(m.phone, 'EXPIRY_5_DAY', m.name, { expiryDate: c.endDate.toISOString().split('T')[0], dueAmount })
         await prisma.notificationLog.create({ 
@@ -102,7 +110,7 @@ export async function POST(request: Request) {
 
         const ledger = await computeGlobalMemberLedger(m.id)
         const dueAmount = Math.max(0, Math.round(ledger.remaining))
-        if (dueAmount > 1) stats.withPendingDue.tagged++
+        if (dueAmount > 0) stats.withPendingDue.tagged++
 
         const ok = await sendWhatsAppStub(m.phone, 'EXPIRY_1_DAY', m.name, { expiryDate: c.endDate.toISOString().split('T')[0], dueAmount })
         await prisma.notificationLog.create({ 
@@ -171,11 +179,7 @@ export async function POST(request: Request) {
           continue 
         }
 
-        const ledger = await computeGlobalMemberLedger(m.id)
-        const dueAmount = Math.max(0, Math.round(ledger.remaining))
-        if (dueAmount > 1) stats.withPendingDue.tagged++
-
-        const ok = await sendWhatsAppStub(m.phone, 'INACTIVITY', m.name, { dueAmount })
+        const ok = await sendWhatsAppStub(m.phone, 'INACTIVITY', m.name)
         await prisma.notificationLog.create({ 
           data: { memberId: m.id, type: 'INACTIVITY', status: ok ? 'sent' : 'failed' } 
         })
@@ -194,6 +198,18 @@ export async function POST(request: Request) {
   }
 }
 
+export async function POST(request: Request) {
+  const denied = verifyCronAuth(request)
+  if (denied) return denied
+  return runNotifyJob()
+}
+
+export async function GET(request: Request) {
+  const denied = verifyCronAuth(request)
+  if (denied) return denied
+  return runNotifyJob()
+}
+
 /**
  * WhatsApp Delivery Engine (Stub Version)
  * Real API integration point for production.
@@ -204,28 +220,28 @@ async function sendWhatsAppStub(
   memberName: string, 
   meta?: { expiryDate?: string; dueAmount?: number }
 ): Promise<boolean> {
-  const dueSuffix = (meta?.dueAmount ?? 0) > 1
-    ? ` Pending due: ₹${Math.round(meta?.dueAmount || 0)}. Please clear it.`
-    : ""
-  const messages = {
-    EXPIRY_5_DAY: `Hi ${memberName}, your gym membership expires in 5 days on ${meta?.expiryDate}. Please renew to continue.${dueSuffix} Contact us: ROYAL FITNESS`,
-    EXPIRY_1_DAY: `Hi ${memberName}, your membership expires TOMORROW on ${meta?.expiryDate}. Renew today!${dueSuffix} Contact us: ROYAL FITNESS`,
-    INACTIVITY: `Hi ${memberName}, we miss you at the gym! It has been 4 days since your last visit. Come back today!${dueSuffix} ROYAL FITNESS`
+  const dueRounded = Math.max(0, Math.round(meta?.dueAmount ?? 0))
+  const exp = meta?.expiryDate ?? ""
+  const duePart =
+    dueRounded > 0
+      ? ` Also clear your pending dues of ₹${dueRounded}.`
+      : ""
+
+  const messages: Record<typeof type, string> = {
+    EXPIRY_5_DAY:
+      dueRounded > 0
+        ? `Hi ${memberName}, your plan expires in 5 days on ${exp}. Please renew before it ends.${duePart} Contact us: ROYAL FITNESS`
+        : `Hi ${memberName}, your plan expires in 5 days on ${exp}. Please renew before it ends. Contact us: ROYAL FITNESS`,
+    EXPIRY_1_DAY:
+      dueRounded > 0
+        ? `Hi ${memberName}, your plan expires TOMORROW on ${exp}. Please renew now.${duePart} Contact us: ROYAL FITNESS`
+        : `Hi ${memberName}, your plan expires TOMORROW on ${exp}. Please renew now. Contact us: ROYAL FITNESS`,
+    INACTIVITY: `Hi ${memberName}, we miss you at the gym! It has been 4 days since your last visit. Come back today! ROYAL FITNESS`
   }
-  
+
   const msg = messages[type]
   console.log(`[WhatsApp STUB] TO: ${phone} | MSG: ${msg}`)
   
   // Simulation: Always succeed for now
   return true
-}
-
-/**
- * Guard: Block GET access to prevent simple URL triggers
- */
-export async function GET() {
-  return NextResponse.json(
-    { error: "Method Not Allowed" }, 
-    { status: 405, headers: { "Allow": "POST" } }
-  )
 }

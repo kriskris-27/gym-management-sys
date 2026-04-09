@@ -8,7 +8,12 @@ import {
 } from "./subscription"
 import type { DateTime } from "luxon"
 import { fromDate } from "@/lib/utils"
-import { GYM_TIMEZONE, gymNow, isMembershipEndPast } from "@/lib/gym-datetime"
+import {
+  GYM_TIMEZONE,
+  gymNow,
+  isMembershipEndPast,
+  luxonStartOfGymDayFromInput,
+} from "@/lib/gym-datetime"
 
 type Tx = Prisma.TransactionClient
 type MemberAction = "renew"
@@ -290,8 +295,8 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
     }
 
     if (payload.startDate) {
-      const parsed = fromDate(new Date(payload.startDate))
-      if (!parsed.isValid) {
+      const parsed = luxonStartOfGymDayFromInput(payload.startDate)
+      if (!parsed || !parsed.isValid) {
         throw new MemberLifecycleError(400, "Invalid start date", "INVALID_START_DATE")
       }
       resolvedStartDate = parsed
@@ -335,7 +340,13 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
       )
     }
     const resolvedEndDate = payload.endDate
-      ? fromDate(new Date(payload.endDate))
+      ? (() => {
+          const endLux = luxonStartOfGymDayFromInput(payload.endDate)
+          if (!endLux || !endLux.isValid) {
+            throw new MemberLifecycleError(400, "Invalid end date", "INVALID_END_DATE")
+          }
+          return endLux
+        })()
       : resolvedStartDate.plus({ days: plan.durationDays })
 
     const createdSubscription = await tx.subscription.create({

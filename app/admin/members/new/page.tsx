@@ -6,7 +6,7 @@ import { useForm, type Resolver, type SubmitHandler } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useCreateMember } from "@/hooks/useCreateMember"
-import { todayYmdInIST } from "@/lib/gym-datetime"
+import { parseGymDateOnly, todayYmdInIST } from "@/lib/gym-datetime"
 
 const schema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters")
@@ -151,11 +151,11 @@ export default function AddMemberPage() {
      }
   }, [finalAmount, membershipType, setValue])
 
-  // Auto-calculate end date
+  // Auto-calculate end date (IST calendar days — matches server `membershipEndDateFromStartAndDurationDaysIST`)
   useEffect(() => {
     if (membershipType !== "OTHERS" && startDate) {
-      const start = new Date(startDate)
-      if (!isNaN(start.getTime())) {
+      const start = parseGymDateOnly(startDate)
+      if (start?.isValid) {
         const durations: Record<string, number> = {
           MONTHLY: 30,
           QUARTERLY: 90,
@@ -163,8 +163,8 @@ export default function AddMemberPage() {
           ANNUAL: 365,
         }
         const days = durations[membershipType] || 30
-        const end = new Date(start.getTime() + days * 24 * 60 * 60 * 1000)
-        setValue("endDate", end.toISOString().split("T")[0], { shouldValidate: true })
+        const end = start.plus({ days })
+        setValue("endDate", end.toFormat("yyyy-LL-dd"), { shouldValidate: true })
       }
     } else if (membershipType === "OTHERS") {
       setValue("endDate", "", { shouldValidate: true })
@@ -175,10 +175,20 @@ export default function AddMemberPage() {
     setGeneralError("")
 
     try {
+      const startJs = parseGymDateOnly(data.startDate)?.toJSDate()
+      if (!startJs) {
+        setGeneralError("Invalid start date")
+        return
+      }
+      const endJs = data.endDate ? parseGymDateOnly(data.endDate)?.toJSDate() : undefined
+      if (data.endDate && !endJs) {
+        setGeneralError("Invalid end date")
+        return
+      }
       const transformedData = {
         ...data,
-        startDate: new Date(data.startDate),
-        endDate: data.endDate ? new Date(data.endDate) : undefined,
+        startDate: startJs,
+        endDate: endJs,
       }
 
       const result = await createMemberMutation.mutateAsync(transformedData)
