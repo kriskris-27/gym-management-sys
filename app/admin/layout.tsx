@@ -117,7 +117,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Show loading while checking authentication
   if (!authChecked) {
     return (
-      <div className="flex bg-[#080808] min-h-dvh text-white font-sans items-center justify-center px-4">
+      <div className="flex min-h-dvh h-dvh w-full bg-[#080808] text-white font-sans items-center justify-center px-4">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#D11F00] mx-auto mb-4"></div>
           <p>Checking authentication...</p>
@@ -127,7 +127,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="flex bg-[#080808] min-h-dvh text-white font-sans selection:bg-[#D11F00]/30">
+    <div className="flex h-dvh min-h-0 max-h-dvh w-full flex-row overflow-hidden bg-[#080808] text-white font-sans selection:bg-[#D11F00]/30">
       <style>{`
         @keyframes slideInSidebar {
           from { transform: translateX(-240px); opacity: 0; }
@@ -253,7 +253,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
 
             {/* MIDDLE: Navigation */}
-            <nav className="flex-1 px-3 py-6 space-y-0.5">
+            <nav className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-3 py-6 space-y-0.5 [-webkit-overflow-scrolling:touch]">
               {navItems.map((item) => {
                 const active = isActive(item.path)
                 return (
@@ -306,7 +306,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </aside>
 
           {/* MAIN CONTENT */}
-          <main className="flex-1 min-w-0 md:ml-[240px] lg:ml-[260px] min-h-dvh bg-[#080808] overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
+          <main className="min-h-0 flex-1 min-w-0 md:ml-[240px] lg:ml-[260px] bg-[#080808] overflow-x-hidden overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
             {children}
           </main>
         </>

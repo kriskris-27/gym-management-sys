@@ -58,9 +58,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${gymSans.variable} ${geistMono.variable} ${gymDisplay.variable} h-full min-h-dvh overflow-x-hidden antialiased`}
+      className={`${gymSans.variable} ${geistMono.variable} ${gymDisplay.variable} min-h-dvh overflow-x-hidden antialiased`}
     >
-      <body className="min-h-dvh flex flex-col overflow-x-hidden touch-manipulation">
+      <body className="flex min-h-dvh flex-col overflow-x-hidden overflow-y-auto touch-manipulation [-webkit-overflow-scrolling:touch]">
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -365,38 +365,29 @@ export default function AdminReportsPage() {
           <h1 className="text-[28px] font-black text-white">Reports</h1>
           <p className="text-[13px] text-[#444444]">Monthly analytics</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex gap-2">
-            <select
-              value={month}
-              onChange={(e) => setMonth(Number(e.target.value))}
-              className="rounded-lg border border-[#1C1C1C] bg-[#111111] px-3 py-2 text-[12px] text-white focus:border-[#D11F00] focus:outline-none"
-            >
-              {MONTHS.map((m, idx) => (
-                <option key={m} value={idx + 1}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            <select
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="rounded-lg border border-[#1C1C1C] bg-[#111111] px-3 py-2 text-[12px] text-white focus:border-[#D11F00] focus:outline-none"
-            >
-              {years.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={() => alert("PDF export coming soon")}
-            className="themeFancyBtn px-4 py-2"
+        <div className="flex flex-wrap gap-2">
+          <select
+            value={month}
+            onChange={(e) => setMonth(Number(e.target.value))}
+            className="rounded-lg border border-[#1C1C1C] bg-[#111111] px-3 py-2 text-[12px] text-white focus:border-[#D11F00] focus:outline-none"
           >
-            <span>Export PDF</span>
-          </button>
+            {MONTHS.map((m, idx) => (
+              <option key={m} value={idx + 1}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <select
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className="rounded-lg border border-[#1C1C1C] bg-[#111111] px-3 py-2 text-[12px] text-white focus:border-[#D11F00] focus:outline-none"
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

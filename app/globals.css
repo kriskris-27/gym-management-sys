@@ -197,7 +197,7 @@ body {
   right: -32px;
 }
 
-/* Reusable animated card shell (neutral) — min-height + auto grow so figures never clip vertically */
+/* Reusable animated card shell — clip FX so every tile matches; lines use fixed insets (not %) so height doesn’t shift the grid */
 .themeFxCardOuter {
   width: 100%;
   min-height: 120px;
@@ -206,6 +206,8 @@ body {
   padding: 1px;
   background: radial-gradient(circle 230px at 0% 0%, #cfcfcf, #0c0d0d);
   position: relative;
+  overflow: hidden;
+  isolation: isolate;
 }
 
 .themeFxCard {
@@ -216,8 +218,7 @@ body {
   border: solid 1px #202222;
   background: radial-gradient(circle 280px at 0% 0%, #3a3a3a, #0c0d0d);
   position: relative;
-  overflow-x: clip;
-  overflow-y: visible;
+  overflow: hidden;
   padding: 14px 14px 16px;
 }
 
@@ -228,49 +229,80 @@ body {
 }
 
 .themeFxCardRay {
-  width: 220px;
-  height: 45px;
+  width: 200px;
+  height: 40px;
   border-radius: 100px;
   position: absolute;
   background-color: #b2b2b2;
-  opacity: 0.1;
-  box-shadow: 0 0 26px rgba(255, 255, 255, 0.5);
-  filter: blur(11px);
+  opacity: 0.08;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.35);
+  filter: blur(10px);
   transform-origin: 10%;
-  top: 0%;
-  left: 0;
+  top: -6px;
+  left: -10px;
   transform: rotate(40deg);
+  pointer-events: none;
 }
 
 .themeFxCardLine {
   position: absolute;
+  pointer-events: none;
   background-color: #2c2c2c;
 }
 .themeFxCardLineTop {
-  top: 10%;
-  left: 0;
-  width: 100%;
+  top: 12px;
+  left: 12px;
+  right: 12px;
   height: 1px;
+  width: auto;
   background: linear-gradient(90deg, #6f6f6f 30%, #1d1f1f 70%);
 }
 .themeFxCardLineBottom {
-  bottom: 10%;
-  left: 0;
-  width: 100%;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
   height: 1px;
+  width: auto;
+  background: linear-gradient(90deg, #1d1f1f 30%, #6f6f6f 70%);
 }
 .themeFxCardLineLeft {
-  left: 10%;
-  top: 0;
+  left: 12px;
+  top: 12px;
+  bottom: 12px;
   width: 1px;
-  height: 100%;
+  height: auto;
   background: linear-gradient(180deg, #5f5f5f 30%, #222424 70%);
 }
 .themeFxCardLineRight {
-  right: 10%;
-  top: 0;
+  right: 12px;
+  top: 12px;
+  bottom: 12px;
   width: 1px;
-  height: 100%;
+  height: auto;
+  background: linear-gradient(180deg, #222424 30%, #5f5f5f 70%);
+}
+
+@media (min-width: 768px) {
+  .themeFxCardLineTop {
+    top: 14px;
+    left: 14px;
+    right: 14px;
+  }
+  .themeFxCardLineBottom {
+    bottom: 14px;
+    left: 14px;
+    right: 14px;
+  }
+  .themeFxCardLineLeft {
+    left: 14px;
+    top: 14px;
+    bottom: 14px;
+  }
+  .themeFxCardLineRight {
+    right: 14px;
+    top: 14px;
+    bottom: 14px;
+  }
 }
 
 /* Reusable speed loader (plain CSS version) */
