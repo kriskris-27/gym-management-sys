@@ -2,6 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { DateTime } from "luxon"
+import { GYM_TIMEZONE } from "@/lib/gym-datetime"
 import { formatDuration } from "@/lib/utils"
 
 type CheckinStatus =
@@ -26,9 +28,50 @@ type ScanResult = {
 }
 
 const STORAGE_KEY = "gym_member_phone"
+/** QR mode: after CHECKED_IN, block auto POST on reload until explicit checkout (avoids accidental Chrome revisit). */
+const RESUME_CHECKIN_KEY = "gym_checkin_resume"
 const PHONE_REGEX = /^[6-9]\d{9}$/
 
+type ResumePayload = { phone: string; memberName: string; checkedInAt: string }
+
+function readResume(): ResumePayload | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = localStorage.getItem(RESUME_CHECKIN_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as ResumePayload
+    if (!p.phone || !PHONE_REGEX.test(p.phone)) return null
+    if (!p.checkedInAt) {
+      clearResume()
+      return null
+    }
+    const checkInZ = DateTime.fromISO(p.checkedInAt, {
+      zone: "utc",
+    }).setZone(GYM_TIMEZONE)
+    const todayStart = DateTime.now().setZone(GYM_TIMEZONE).startOf("day")
+    if (!checkInZ.isValid || !checkInZ.hasSame(todayStart, "day")) {
+      clearResume()
+      return null
+    }
+    return p
+  } catch {
+    return null
+  }
+}
+
+function writeResume(payload: ResumePayload) {
+  localStorage.setItem(RESUME_CHECKIN_KEY, JSON.stringify(payload))
+}
+
+function clearResume() {
+  localStorage.removeItem(RESUME_CHECKIN_KEY)
+}
+
 let autoCheckinStarted = false
+
+function tryCloseBrowserTab() {
+  window.close()
+}
 
 function CheckinContent() {
   const searchParams = useSearchParams()
@@ -74,6 +117,7 @@ function CheckinContent() {
 
         if (res.status === 404 && data.status === "NOT_FOUND") {
           localStorage.removeItem(STORAGE_KEY)
+          clearResume()
           setStatus("not_found")
           return
         }
@@ -117,10 +161,23 @@ function CheckinContent() {
 
         setResult(data as ScanResult)
 
-        if (data.status === "CHECKED_IN") setStatus("checked_in")
-        else if (data.status === "CHECKED_OUT") setStatus("checked_out")
-        else if (data.status === "ALREADY_DONE") setStatus("already_done")
-        else {
+        if (data.status === "CHECKED_IN") {
+          setPhone(phoneNumber)
+          if (!isManualMode) {
+            writeResume({
+              phone: phoneNumber,
+              memberName: data.memberName ?? "Member",
+              checkedInAt: data.checkedInAt ?? "",
+            })
+          }
+          setStatus("checked_in")
+        } else if (data.status === "CHECKED_OUT") {
+          if (!isManualMode) clearResume()
+          setStatus("checked_out")
+        } else if (data.status === "ALREADY_DONE") {
+          if (!isManualMode) clearResume()
+          setStatus("already_done")
+        } else {
           setErrorMessage("Unexpected status.")
           setStatus("error")
         }
@@ -137,13 +194,27 @@ function CheckinContent() {
     if (isManualMode) return
     if (autoCheckinStarted) return
     const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved && PHONE_REGEX.test(saved)) {
+    if (!saved || !PHONE_REGEX.test(saved)) return
+
+    const resume = readResume()
+    if (resume && resume.phone === saved) {
       autoCheckinStarted = true
-      // Use setTimeout to avoid calling setState synchronously in effect
       setTimeout(() => {
-        void handleScan(saved)
+        setPhone(resume.phone)
+        setResult({
+          status: "CHECKED_IN",
+          memberName: resume.memberName,
+          checkedInAt: resume.checkedInAt,
+        })
+        setStatus("checked_in")
       }, 0)
+      return
     }
+
+    autoCheckinStarted = true
+    setTimeout(() => {
+      void handleScan(saved)
+    }, 0)
   }, [isManualMode, handleScan])
 
   useEffect(() => {
@@ -198,6 +269,7 @@ function CheckinContent() {
   const handleNotYou = () => {
     if (!isManualMode) {
       localStorage.removeItem(STORAGE_KEY)
+      clearResume()
     }
     setStatus("idle")
     setPhone("")
@@ -208,6 +280,7 @@ function CheckinContent() {
 
   const handleTryAnother = () => {
     localStorage.removeItem(STORAGE_KEY)
+    clearResume()
     setStatus("idle")
     setPhone("")
     setResult(null)
@@ -224,6 +297,9 @@ function CheckinContent() {
     (result?.durationMinutes != null
       ? formatDuration(result.durationMinutes)
       : "—")
+
+  const canCheckout =
+    status === "checked_in" && PHONE_REGEX.test(phone)
 
   return (
     <div
@@ -352,9 +428,35 @@ function CheckinContent() {
             </div>
           ) : null}
 
-          <p className="mt-6 text-[12px] text-[#333333]">
-            Scan again to check out
+          <p className="mt-4 text-[12px] leading-relaxed text-[#555555]">
+            When leaving, open this link again and tap{" "}
+            <span className="text-[#888888]">Check out</span>. Reopening this page
+            by mistake won&apos;t check you out.
           </p>
+
+          <div className="mt-6 flex w-full flex-col gap-3">
+            <button
+              type="button"
+              disabled={!canCheckout}
+              onClick={() => {
+                if (canCheckout) void handleScan(phone)
+              }}
+              className="w-full rounded-xl border border-[#D11F00]/40 bg-[#D11F00]/15 py-4 text-[14px] font-black uppercase tracking-[0.08em] text-[#D11F00] transition-all duration-200 hover:bg-[#D11F00]/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Check out
+            </button>
+            <button
+              type="button"
+              onClick={() => tryCloseBrowserTab()}
+              className="w-full rounded-xl border border-[#2A2A2A] bg-[#141414] py-3.5 text-[12px] font-bold uppercase tracking-[0.06em] text-[#888888] transition-colors hover:border-[#333333] hover:text-[#b0b0b0] active:scale-[0.99]"
+            >
+              Close tab
+            </button>
+            <p className="text-center text-[10px] text-[#333333]">
+              &quot;Close tab&quot; may not work in all browsers; you can switch
+              apps or swipe the tab away.
+            </p>
+          </div>
 
           {isManualMode && manualCountdown !== null && manualCountdown > 0 ? (
             <p
@@ -399,6 +501,14 @@ function CheckinContent() {
 
           <p className="mt-4 text-[12px] text-[#333333]">Great workout! 💪</p>
 
+          <button
+            type="button"
+            onClick={() => tryCloseBrowserTab()}
+            className="mt-6 w-full rounded-xl border border-[#2A2A2A] bg-[#141414] py-3.5 text-[12px] font-bold uppercase tracking-[0.06em] text-[#888888] transition-colors hover:border-[#333333] hover:text-[#b0b0b0] active:scale-[0.99]"
+          >
+            Close tab
+          </button>
+
           {isManualMode && manualCountdown !== null && manualCountdown > 0 ? (
             <p
               key={manualCountdown}
@@ -441,6 +551,14 @@ function CheckinContent() {
           </div>
 
           <p className="mt-4 text-[12px] text-[#333333]">See you tomorrow!</p>
+
+          <button
+            type="button"
+            onClick={() => tryCloseBrowserTab()}
+            className="mt-6 w-full rounded-xl border border-[#2A2A2A] bg-[#141414] py-3.5 text-[12px] font-bold uppercase tracking-[0.06em] text-[#888888] transition-colors hover:border-[#333333] hover:text-[#b0b0b0] active:scale-[0.99]"
+          >
+            Close tab
+          </button>
 
           {isManualMode && manualCountdown !== null && manualCountdown > 0 ? (
             <p
