@@ -210,7 +210,7 @@ export default function SettingsPage() {
             <div className="themeFxCardLine themeFxCardLineLeft" />
             <div className="themeFxCardLine themeFxCardLineRight" />
             <p className="font-black text-[2.2rem] tracking-[0.04em] bg-[linear-gradient(45deg,#000000_4%,#fff,#000)] bg-clip-text text-transparent">ROYAL</p>
-            <p className="text-[12px] text-[#a9a9a9] mt-1.5 tracking-[0.08em] uppercase">Fitness Card</p>
+            <p className="text-[12px] text-[#a9a9a9] mt-1.5 tracking-[0.08em] uppercase">Fitness</p>
           </div>
         </div>
       </div>

@@ -9,8 +9,12 @@ import { LoginSchema } from "@/lib/validations"
  * Note: For distributed production (Vercel/Multiple Instances), use Upstash Redis (Phase 2).
  */
 const rateLimitMap = new Map<string, { count: number; lastAttempt: number }>()
-const LIMIT = 5
-const WINDOW_MS = 15 * 60 * 1000 // 15 Minute window
+const DEFAULT_LIMIT = 10
+const DEFAULT_WINDOW_MS = 15 * 60 * 1000 // 15 minute window
+
+const LIMIT = Number.parseInt(process.env.LOGIN_RATE_LIMIT ?? "", 10) || DEFAULT_LIMIT
+const WINDOW_MS =
+  Number.parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MS ?? "", 10) || DEFAULT_WINDOW_MS
 
 export async function POST(request: Request) {
   // Use X-Forwarded-For or a fallback for local testing

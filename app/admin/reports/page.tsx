@@ -422,10 +422,10 @@ export default function AdminReportsPage() {
             <div className="relative z-10 min-w-0 w-full">
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#b9b9b9]">TOTAL SALES</p>
               <p className={`mt-2 font-black text-[#F59E0B] ${statRupeeClass}`}>
-                {formatRupeeStatCard(data?.revenue.collectedForCurrentMonthSales ?? 0)}
+                {formatRupeeStatCard(data?.revenue.expectedTotal ?? 0)}
               </p>
               <p className="mt-1 text-[11px] text-[#c9c9c9]">
-                Total sales: ₹{(data?.revenue.expectedTotal ?? 0).toLocaleString("en-IN")}
+                Collected: ₹{(data?.revenue.collectedForCurrentMonthSales ?? 0).toLocaleString("en-IN")}
               </p>
               {(data?.revenue.pendingAfterDiscount ?? 0) > 0 ? (
                 <p className="mt-1 text-[12px] text-[#D11F00] font-medium">

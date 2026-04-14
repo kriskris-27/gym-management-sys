@@ -2,9 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { verifyToken, AUTH_COOKIE } from "./lib/auth"
 
-/**
- * Public routes that do not require any authentication
- */
+
 const PUBLIC_ROUTES = [
   "/login",
   "/checkin",
@@ -14,9 +12,7 @@ const PUBLIC_ROUTES = [
   "/api/cron/close-sessions",
 ]
 
-/**
- * List of prefixes to always exclude from middleware protection (static assets, etc.)
- */
+
 const EXCLUDE_PREFIXES = ["/_next", "/images", "/favicon.ico"]
 
 export default async function proxy(request: NextRequest) {
@@ -30,10 +26,10 @@ export default async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // 2. Read JWT from HttpOnly cookie
+
   const token = request.cookies.get(AUTH_COOKIE)?.value
 
-  // 3. Unauthorized access check
+
   const payload = token ? await verifyToken(token) : null
 
   if (!payload || !payload.userId) {
@@ -42,12 +38,12 @@ export default async function proxy(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Page protection → Redirect to /login
+
     const url = new URL("/login", request.url)
     return NextResponse.redirect(url)
   }
 
-  // 4. Authorized - strip Authorization headers downstream for defense-in-depth
+
   const requestHeaders = new Headers(request.headers)
   requestHeaders.delete("Authorization")
 
@@ -58,10 +54,7 @@ export default async function proxy(request: NextRequest) {
   })
 }
 
-/**
- * Next.js 16+ uses this file as the request proxy (do not add root `middleware.ts` — both files conflict).
- * `config` must be defined here so it can be parsed at compile time.
- */
+
 export const config = {
   matcher: [
     "/admin",

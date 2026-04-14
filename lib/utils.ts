@@ -182,22 +182,10 @@ export async function withRetry<T>(
 }
 
 /**
- * Compact ₹ string for small stat cards so long amounts don’t overflow.
- * Below 10k uses grouped locale; above uses k / L / Cr.
+ * Full ₹ string with Indian grouping (no k / L / Cr compaction).
  */
 export function formatRupeeStatCard(amount: number): string {
   const v = Math.round(Math.max(0, amount))
-  if (v >= 10000000) {
-    const cr = v / 10000000
-    return `₹${cr % 1 === 0 ? cr.toFixed(0) : cr.toFixed(1)}Cr`
-  }
-  if (v >= 100000) {
-    const l = v / 100000
-    return `₹${l % 1 === 0 ? l.toFixed(0) : l.toFixed(1)}L`
-  }
-  if (v >= 10000) {
-    return `₹${Math.round(v / 1000)}k`
-  }
   return `₹${v.toLocaleString("en-IN")}`
 }
 
