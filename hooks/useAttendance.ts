@@ -35,3 +35,25 @@ export function useMemberAttendance(
     enabled: !!memberId,
   })
 }
+
+export function useAttendanceByDate(date: string, options?: { live?: boolean }) {
+  const live = options?.live ?? false
+  return useQuery({
+    queryKey: ["attendance", "history", date],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        startDate: date,
+        endDate: date,
+      })
+      const res = await fetch(`/api/attendance/history?${params.toString()}`, {
+        cache: "no-store",
+      })
+      if (!res.ok) throw new Error("Failed to fetch attendance history")
+      return res.json()
+    },
+    staleTime: live ? 0 : 30 * 1000,
+    refetchInterval: live ? 2000 : false,
+    refetchOnWindowFocus: true,
+    enabled: !!date,
+  })
+}

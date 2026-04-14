@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireAuthUser } from "@/lib/api-auth"
 import { getAttendanceStats, listValidSessionsForReport } from "@/domain/attendance"
-import { parseISTSessionDayRange } from "@/lib/gym-datetime"
+import { parseISTSessionDayRange, gymYmdFromInstant } from "@/lib/gym-datetime"
 import { calcDuration, formatDuration, fromDate } from "@/lib/utils"
 
 /**
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
         memberId: session.memberId,
         memberName: session.member.name,
         memberPhone: session.member.phone,
-        date: session.sessionDay.toISOString().split("T")[0],
+        date: gymYmdFromInstant(session.sessionDay),
         checkedInAt: session.checkIn.toISOString(),
         checkedOutAt: session.checkOut!.toISOString(),
         durationMinutes: minutes,

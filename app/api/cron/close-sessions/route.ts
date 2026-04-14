@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { fromDate, calcDuration } from "@/lib/utils"
 import { DateTime } from "luxon"
+import { GYM_TIMEZONE } from "@/lib/gym-datetime"
 
 export const maxDuration = 60
 
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401 })
   }
 
-  const now = DateTime.now().setZone("Asia/Kolkata")
+  const now = DateTime.now().setZone(GYM_TIMEZONE)
   const todayStart = now.startOf("day")
 
   try {
@@ -66,7 +67,7 @@ export async function GET(request: Request) {
     let previousDayClosed = 0
     const previousDayUpdates = staleSessions.map(session => {
       // Calculate closing time for that session's specific day
-      const sessionDayIST = DateTime.fromJSDate(session.sessionDay, { zone: "Asia/Kolkata" })
+      const sessionDayIST = DateTime.fromJSDate(session.sessionDay, { zone: GYM_TIMEZONE })
       const closingTime = sessionDayIST.set({ hour: closingHour, minute: closingMinute, second: 0 })
 
       // Use closing time as checkOut, but never earlier than checkIn

@@ -152,9 +152,17 @@ export default function AttendancePage() {
           </h1>
           <p className="text-[#444444] text-[13px] mt-1">{getTodayLabel()}</p>
         </div>
-        <div className="flex items-center gap-2 bg-[#D11F00]/10 text-[#D11F00] text-[10px] font-bold tracking-[0.15em] uppercase px-3 py-1.5 rounded-full border border-[#D11F00]/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#D11F00] dot-pulse inline-block" />
-          Live
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/admin/attendance/history")}
+            className="px-3 py-1.5 rounded-md text-[11px] font-medium border border-[#2A2A2A] bg-[#111111] text-white hover:border-[#D11F00]/40 hover:text-[#D11F00] transition-colors duration-200 cursor-pointer"
+          >
+            History
+          </button>
+          <div className="flex items-center gap-2 bg-[#D11F00]/10 text-[#D11F00] text-[10px] font-bold tracking-[0.15em] uppercase px-3 py-1.5 rounded-full border border-[#D11F00]/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D11F00] dot-pulse inline-block" />
+            Live
+          </div>
         </div>
       </div>
 

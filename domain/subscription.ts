@@ -1,5 +1,11 @@
 import { prisma } from "../lib/prisma"
-import { isMembershipEndPast, subscriptionWindowCoversNow } from "../lib/gym-datetime"
+import {
+  getMembershipDayInfo,
+  isMembershipEndPast,
+  subscriptionWindowCoversNow,
+  GYM_TIMEZONE,
+} from "../lib/gym-datetime"
+import { DateTime } from "luxon"
 import type { Prisma } from "@prisma/client"
 
 type DbClient = typeof prisma | Prisma.TransactionClient
@@ -331,18 +337,23 @@ export async function getSubscriptionExpiry(
     }
   }
 
-  const now = new Date()
   const expiryDate = activeSubscription.endDate
-  const daysRemaining = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  const graceEndDate = new Date(expiryDate.getTime() + (graceDays * 24 * 60 * 60 * 1000))
-  const graceDaysRemaining = Math.ceil((graceEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  
+  const info = getMembershipDayInfo(expiryDate)
+  const endZ = DateTime.fromJSDate(expiryDate, { zone: "utc" }).setZone(GYM_TIMEZONE)
+  const nowGym = DateTime.now().setZone(GYM_TIMEZONE)
+  const pastSubscriptionDay = nowGym > endZ.endOf("day")
+  const graceEndsAt = endZ.endOf("day").plus({ days: graceDays })
+  const inGraceWindow = pastSubscriptionDay && nowGym <= graceEndsAt
+  const graceDaysRemaining = inGraceWindow
+    ? Math.max(0, Math.ceil(graceEndsAt.diff(nowGym).as("days")))
+    : 0
+
   return {
-    isExpired: daysRemaining <= 0,
-    isInGrace: daysRemaining <= 0 && graceDaysRemaining > 0,
-    daysRemaining: Math.max(0, daysRemaining),
-    graceDaysRemaining: Math.max(0, graceDaysRemaining),
-    expiryDate
+    isExpired: pastSubscriptionDay,
+    isInGrace: inGraceWindow,
+    daysRemaining: pastSubscriptionDay ? 0 : info.daysUntilEndInclusive,
+    graceDaysRemaining,
+    expiryDate,
   }
 }
 

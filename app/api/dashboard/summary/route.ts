@@ -2,8 +2,13 @@ import { NextResponse } from "next/server"
 import { DateTime } from "luxon"
 import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
-import { getTodaySessionDayJS, GYM_TIMEZONE } from "@/lib/gym-datetime"
-import { getUTCDateRange, nowUTC } from "@/lib/utils"
+import {
+  getMembershipDayInfo,
+  getTodaySessionDayJS,
+  GYM_TIMEZONE,
+  gymYmdFromInstant,
+} from "@/lib/gym-datetime"
+import { getUTCDateRange } from "@/lib/utils"
 
 /**
  * GET: Single request dashboard aggregator
@@ -80,7 +85,7 @@ export async function GET() {
         }),
 
         prisma.notificationLog.count({
-          where: { status: "failed" },
+          where: { status: "FAILED" },
         }),
       ])
 
@@ -103,15 +108,13 @@ export async function GET() {
           const subscription = m.subscriptions[0]
           if (!subscription) return null
 
-          const now = nowUTC()
-          const diff = subscription.endDate.getTime() - now.toJSDate().getTime()
-          const daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24))
+          const { daysUntilEndInclusive } = getMembershipDayInfo(subscription.endDate)
           return {
             id: m.id,
             name: m.name,
             phone: m.phone,
-            endDate: subscription.endDate.toISOString().split("T")[0],
-            daysLeft: Math.max(0, daysLeft),
+            endDate: gymYmdFromInstant(subscription.endDate),
+            daysLeft: daysUntilEndInclusive,
           }
         })
         .filter(Boolean),

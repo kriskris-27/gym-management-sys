@@ -75,7 +75,7 @@ export async function GET(request: Request) {
       prisma.payment.findMany({
         where,
         include: {
-          member: { select: { name: true } },
+          member: { select: { name: true, phone: true } },
           subscription: {
             select: {
               id: true,
@@ -97,6 +97,7 @@ export async function GET(request: Request) {
       id: p.id,
       memberId: p.memberId,
       memberName: p.member.name,
+      memberPhone: p.member.phone ?? "",
       subscriptionId: p.subscriptionId ?? null,
       subscription: p.subscription
         ? {
@@ -154,7 +155,7 @@ export async function POST(request: Request) {
     // 1. Verify Member is Valid
     const member = await prisma.member.findUnique({
       where: { id: data.memberId },
-      select: { id: true, name: true, status: true }
+      select: { id: true, name: true, phone: true, status: true },
     })
 
     if (!member || member.status === "DELETED") {
@@ -269,8 +270,8 @@ export async function POST(request: Request) {
         purpose: "SUBSCRIPTION"
       },
       include: {
-        member: { select: { name: true } }
-      }
+        member: { select: { name: true, phone: true } },
+      },
     })
 
     console.log(`[Payment Create] Created payment ${payment.id} for member ${data.memberId}`)
@@ -280,11 +281,12 @@ export async function POST(request: Request) {
         id: payment.id,
         memberId: payment.memberId,
         memberName: member.name,
+        memberPhone: member.phone ?? "",
         amount: payment.finalAmount,
         date: payment.createdAt.toISOString(),
         mode: payment.method,
-        notes: payment.notes
-      }
+        notes: payment.notes,
+      },
     }, { status: 201 })
 
   } catch (error) {

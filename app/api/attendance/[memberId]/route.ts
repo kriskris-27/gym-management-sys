@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireAuthUser } from "@/lib/api-auth"
 import prisma from "@/lib/prisma"
 import { formatDuration } from "@/lib/utils"
+import { gymYmdFromInstant } from "@/lib/gym-datetime"
 import { lazyExpireStaleSubscriptionsAndSyncMember } from "@/domain/subscription"
 
 /**
@@ -69,6 +70,7 @@ export async function GET(
       skip,
       take: limit,
       select: {
+        id: true,
         sessionDay: true,
         checkIn: true,
         checkOut: true,
@@ -92,7 +94,8 @@ export async function GET(
           : null
 
         return {
-          date: r.sessionDay.toISOString().split("T")[0],
+          id: r.id,
+          date: gymYmdFromInstant(r.sessionDay),
           checkedInAt: r.checkIn.toISOString(),
           checkedOutAt: r.checkOut?.toISOString() || null,
           durationMinutes: durationMin,

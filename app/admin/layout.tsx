@@ -41,6 +41,12 @@ const navItems = [
       <line x1="6" y1="20" x2="6" y2="14" />
     </svg>
   )},
+  { name: "Notifications", path: "/admin/notifications", icon: (color: string) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  )},
   { name: "Settings", path: "/admin/settings", icon: (color: string) => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />

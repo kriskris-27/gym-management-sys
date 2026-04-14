@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
-import { getISTDateRange } from "@/lib/utils"
 import { computeGlobalMemberLedger } from "@/domain/payment"
-import { DateTime } from "luxon"
+import { gymNow, gymYmdFromInstant } from "@/lib/gym-datetime"
+import type { NotificationStatus, NotificationType } from "@prisma/client"
+import type { Prisma } from "@prisma/client"
 
 /** Pro / higher plans allow longer runs; Hobby caps lower. */
 export const maxDuration = 60
@@ -30,11 +31,9 @@ function verifyCronAuth(request: Request): NextResponse | null {
  * Expiry: always reminds to renew; if ledger shows due > 0, also asks to clear pending dues. Dedupes via NotificationLog.
  */
 async function runNotifyJob(): Promise<NextResponse> {
-  const now = new Date()
-  const { startOfTodayIST } = getISTDateRange()
-  const startOfToday = DateTime.isDateTime(startOfTodayIST)
-    ? startOfTodayIST.toJSDate()
-    : new Date(startOfTodayIST)
+  const now = gymNow().toUTC().toJSDate()
+  const runId = `run-${Date.now()}`
+  const startOfToday = gymNow().startOf("day").toUTC().toJSDate()
 
   // Track outcomes for the final report
   const stats = {
@@ -44,14 +43,47 @@ async function runNotifyJob(): Promise<NextResponse> {
     withPendingDue: { tagged: 0 },
   }
 
+  async function writeLog(params: {
+    memberId: string
+    memberName: string
+    recipientPhone: string
+    type: NotificationType
+    status: NotificationStatus
+    templateKey: string
+    attemptNumber?: number
+    providerMessageId?: string
+    errorCode?: string
+    errorMessage?: string
+    meta?: Prisma.InputJsonValue
+  }) {
+    await prisma.notificationLog.create({
+      data: {
+        memberId: params.memberId,
+        runId,
+        type: params.type,
+        status: params.status,
+        channel: "WHATSAPP",
+        recipientPhone: params.recipientPhone,
+        memberNameSnapshot: params.memberName,
+        templateKey: params.templateKey,
+        attemptNumber: params.attemptNumber ?? 1,
+        providerMessageId: params.providerMessageId,
+        errorCode: params.errorCode,
+        errorMessage: params.errorMessage,
+        meta: params.meta,
+      },
+    })
+  }
+
   try {
     // PREPARE TIME WINDOWS (IST BOUNDED)
     // Expiry targets are checked against IST day starts
-    const fiveDayTargetStart = new Date(startOfToday.getTime() + 5 * 24 * 60 * 60 * 1000)
-    const fiveDayTargetEnd = new Date(fiveDayTargetStart.getTime() + 24 * 60 * 60 * 1000)
-    
-    const oneDayTargetStart = new Date(startOfToday.getTime() + 1 * 24 * 60 * 60 * 1000)
-    const oneDayTargetEnd = new Date(oneDayTargetStart.getTime() + 24 * 60 * 60 * 1000)
+    const baseDay = gymNow().startOf("day")
+    const fiveDayTargetStart = baseDay.plus({ days: 5 }).toUTC().toJSDate()
+    const fiveDayTargetEnd = baseDay.plus({ days: 6 }).toUTC().toJSDate()
+
+    const oneDayTargetStart = baseDay.plus({ days: 1 }).toUTC().toJSDate()
+    const oneDayTargetEnd = baseDay.plus({ days: 2 }).toUTC().toJSDate()
 
     // JOB A: EXPIRY NOTIFICATIONS (5-DAY & 1-DAY)
     // Process 5-Day window
@@ -71,20 +103,67 @@ async function runNotifyJob(): Promise<NextResponse> {
       try {
         const m = c.member
         const alreadySent = await prisma.notificationLog.findFirst({
-          where: { memberId: m.id, type: 'EXPIRY_5_DAY', sentAt: { gte: startOfToday } }
+          where: { memberId: m.id, type: "EXPIRY_5_DAY", status: "SENT", sentAt: { gte: startOfToday } }
         })
-        if (alreadySent) { stats.expiry5Day.skipped++; continue; }
+        if (alreadySent) {
+          stats.expiry5Day.skipped++
+          await writeLog({
+            memberId: m.id,
+            memberName: m.name,
+            recipientPhone: m.phone,
+            type: "EXPIRY_5_DAY",
+            status: "SKIPPED",
+            templateKey: "EXPIRY_5_DAY",
+            errorCode: "ALREADY_SENT_TODAY",
+            errorMessage: "Notification already sent for this member today",
+            meta: { skipReason: "already_sent_today" },
+          })
+          continue
+        }
+
+        if (!m.phone) {
+          stats.expiry5Day.failed++
+          await writeLog({
+            memberId: m.id,
+            memberName: m.name,
+            recipientPhone: "",
+            type: "EXPIRY_5_DAY",
+            status: "FAILED",
+            templateKey: "EXPIRY_5_DAY",
+            errorCode: "MISSING_PHONE",
+            errorMessage: "Member phone is missing",
+            meta: { skipReason: "missing_phone" },
+          })
+          continue
+        }
 
         const ledger = await computeGlobalMemberLedger(m.id)
         const dueAmount = Math.max(0, Math.round(ledger.remaining))
         if (dueAmount > 0) stats.withPendingDue.tagged++
 
-        const ok = await sendWhatsAppStub(m.phone, 'EXPIRY_5_DAY', m.name, { expiryDate: c.endDate.toISOString().split('T')[0], dueAmount })
-        await prisma.notificationLog.create({ 
-          data: { memberId: m.id, type: 'EXPIRY_5_DAY', status: ok ? 'sent' : 'failed' } 
+        const expiryDate = gymYmdFromInstant(c.endDate)
+        const result = await sendWhatsAppStub(m.phone, "EXPIRY_5_DAY", m.name, {
+          expiryDate,
+          dueAmount,
         })
-        if (ok) stats.expiry5Day.sent++; else stats.expiry5Day.failed++;
-      } catch { stats.expiry5Day.failed++; }
+        await writeLog({
+          memberId: m.id,
+          memberName: m.name,
+          recipientPhone: m.phone,
+          type: "EXPIRY_5_DAY",
+          status: result.ok ? "SENT" : "FAILED",
+          templateKey: "EXPIRY_5_DAY",
+          providerMessageId: result.providerMessageId,
+          errorCode: result.errorCode,
+          errorMessage: result.errorMessage,
+          meta: { expiryDate, dueAmount },
+        })
+        if (result.ok) stats.expiry5Day.sent++
+        else stats.expiry5Day.failed++
+      } catch (error) {
+        stats.expiry5Day.failed++
+        console.error("Expiry 5-day notify failed:", error)
+      }
     }
 
     // Process 1-Day window
@@ -104,20 +183,67 @@ async function runNotifyJob(): Promise<NextResponse> {
       try {
         const m = c.member
         const alreadySent = await prisma.notificationLog.findFirst({
-          where: { memberId: m.id, type: 'EXPIRY_1_DAY', sentAt: { gte: startOfToday } }
+          where: { memberId: m.id, type: "EXPIRY_1_DAY", status: "SENT", sentAt: { gte: startOfToday } }
         })
-        if (alreadySent) { stats.expiry1Day.skipped++; continue; }
+        if (alreadySent) {
+          stats.expiry1Day.skipped++
+          await writeLog({
+            memberId: m.id,
+            memberName: m.name,
+            recipientPhone: m.phone,
+            type: "EXPIRY_1_DAY",
+            status: "SKIPPED",
+            templateKey: "EXPIRY_1_DAY",
+            errorCode: "ALREADY_SENT_TODAY",
+            errorMessage: "Notification already sent for this member today",
+            meta: { skipReason: "already_sent_today" },
+          })
+          continue
+        }
+
+        if (!m.phone) {
+          stats.expiry1Day.failed++
+          await writeLog({
+            memberId: m.id,
+            memberName: m.name,
+            recipientPhone: "",
+            type: "EXPIRY_1_DAY",
+            status: "FAILED",
+            templateKey: "EXPIRY_1_DAY",
+            errorCode: "MISSING_PHONE",
+            errorMessage: "Member phone is missing",
+            meta: { skipReason: "missing_phone" },
+          })
+          continue
+        }
 
         const ledger = await computeGlobalMemberLedger(m.id)
         const dueAmount = Math.max(0, Math.round(ledger.remaining))
         if (dueAmount > 0) stats.withPendingDue.tagged++
 
-        const ok = await sendWhatsAppStub(m.phone, 'EXPIRY_1_DAY', m.name, { expiryDate: c.endDate.toISOString().split('T')[0], dueAmount })
-        await prisma.notificationLog.create({ 
-          data: { memberId: m.id, type: 'EXPIRY_1_DAY', status: ok ? 'sent' : 'failed' } 
+        const expiryDate = gymYmdFromInstant(c.endDate)
+        const result = await sendWhatsAppStub(m.phone, "EXPIRY_1_DAY", m.name, {
+          expiryDate,
+          dueAmount,
         })
-        if (ok) stats.expiry1Day.sent++; else stats.expiry1Day.failed++;
-      } catch { stats.expiry1Day.failed++; }
+        await writeLog({
+          memberId: m.id,
+          memberName: m.name,
+          recipientPhone: m.phone,
+          type: "EXPIRY_1_DAY",
+          status: result.ok ? "SENT" : "FAILED",
+          templateKey: "EXPIRY_1_DAY",
+          providerMessageId: result.providerMessageId,
+          errorCode: result.errorCode,
+          errorMessage: result.errorMessage,
+          meta: { expiryDate, dueAmount },
+        })
+        if (result.ok) stats.expiry1Day.sent++
+        else stats.expiry1Day.failed++
+      } catch (error) {
+        stats.expiry1Day.failed++
+        console.error("Expiry 1-day notify failed:", error)
+      }
     }
 
 
@@ -161,6 +287,7 @@ async function runNotifyJob(): Promise<NextResponse> {
       }
     })
 
+    console.log("[INACTIVITY] Raw inactiveMembers:", inactiveMembers)
     for (const m of inactiveMembers) {
       try {
         const lastVisit = m.sessions[0]?.checkIn || m.createdAt
@@ -169,22 +296,63 @@ async function runNotifyJob(): Promise<NextResponse> {
         const alreadyNudgedInThisStreak = await prisma.notificationLog.findFirst({
            where: { 
              memberId: m.id, 
-             type: 'INACTIVITY', 
+             type: "INACTIVITY",
+             status: "SENT",
              sentAt: { gt: lastVisit } 
            }
         })
         
         if (alreadyNudgedInThisStreak) { 
           stats.inactivity.skipped++
+          await writeLog({
+            memberId: m.id,
+            memberName: m.name,
+            recipientPhone: m.phone,
+            type: "INACTIVITY",
+            status: "SKIPPED",
+            templateKey: "INACTIVITY",
+            errorCode: "ALREADY_SENT_IN_STREAK",
+            errorMessage: "Member already nudged in this inactivity streak",
+            meta: { skipReason: "already_sent_in_streak", lastVisit: lastVisit.toISOString() },
+          })
           continue 
         }
 
-        const ok = await sendWhatsAppStub(m.phone, 'INACTIVITY', m.name)
-        await prisma.notificationLog.create({ 
-          data: { memberId: m.id, type: 'INACTIVITY', status: ok ? 'sent' : 'failed' } 
+        if (!m.phone) {
+          stats.inactivity.failed++
+          await writeLog({
+            memberId: m.id,
+            memberName: m.name,
+            recipientPhone: "",
+            type: "INACTIVITY",
+            status: "FAILED",
+            templateKey: "INACTIVITY",
+            errorCode: "MISSING_PHONE",
+            errorMessage: "Member phone is missing",
+            meta: { skipReason: "missing_phone" },
+          })
+          continue
+        }
+
+        const result = await sendWhatsAppStub(m.phone, "INACTIVITY", m.name)
+        await writeLog({
+          memberId: m.id,
+          memberName: m.name,
+          recipientPhone: m.phone,
+          type: "INACTIVITY",
+          status: result.ok ? "SENT" : "FAILED",
+          templateKey: "INACTIVITY",
+          providerMessageId: result.providerMessageId,
+          errorCode: result.errorCode,
+          errorMessage: result.errorMessage,
+          meta: { lastVisit: lastVisit.toISOString() },
         })
-        if (ok) stats.inactivity.sent++; else stats.inactivity.failed++;
-      } catch { stats.inactivity.failed++; }
+        if (result.ok) stats.inactivity.sent++
+        else stats.inactivity.failed++
+      } catch (error) {
+        stats.inactivity.failed++
+        console.error("Inactivity notify failed:", error)
+      }
     }
 
     return NextResponse.json({ 
@@ -219,7 +387,12 @@ async function sendWhatsAppStub(
   type: "EXPIRY_5_DAY" | "EXPIRY_1_DAY" | "INACTIVITY", 
   memberName: string, 
   meta?: { expiryDate?: string; dueAmount?: number }
-): Promise<boolean> {
+): Promise<{
+  ok: boolean
+  providerMessageId?: string
+  errorCode?: string
+  errorMessage?: string
+}> {
   const dueRounded = Math.max(0, Math.round(meta?.dueAmount ?? 0))
   const exp = meta?.expiryDate ?? ""
   const duePart =
@@ -243,5 +416,5 @@ async function sendWhatsAppStub(
   console.log(`[WhatsApp STUB] TO: ${phone} | MSG: ${msg}`)
   
   // Simulation: Always succeed for now
-  return true
+  return { ok: true, providerMessageId: `stub-${Date.now()}` }
 }

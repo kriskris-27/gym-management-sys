@@ -6,7 +6,7 @@ import { useMembers } from "@/hooks/useMembers"
 import { useRestoreMember } from "@/hooks/useRestoreMember"
 import SpeedLoader from "@/app/components/SpeedLoader"
 import { adminPageLoadingClass, adminPageShellClass } from "@/app/components/admin-page-shell"
-import { formatMemberDate } from "@/lib/gym-datetime"
+import { formatMemberDate, getMembershipDayInfo, isMembershipEndPast } from "@/lib/gym-datetime"
 
 interface Member {
   id: string
@@ -71,18 +71,10 @@ export default function MembersPage() {
   }
 
 
-  const now = new Date()
-
   // Date Helpers
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "-"
     return formatMemberDate(dateStr)
-  }
-
-  const getDaysDiff = (endDateStr: string) => {
-    const end = new Date(endDateStr)
-    const diff = end.getTime() - now.getTime()
-    return Math.ceil(diff / (1000 * 60 * 60 * 24))
   }
 
   const formatPlan = (plan: string) => {
@@ -316,8 +308,12 @@ export default function MembersPage() {
                 filtered.map(member => {
                   // Get subscription info from the latest subscription
                   const latestSubscription = member.subscriptions?.[0]
-                  const isExpired = latestSubscription ? new Date(latestSubscription.endDate) < now : false
-                  const daysLeft = latestSubscription ? getDaysDiff(latestSubscription.endDate) : 0
+                  const isExpired = latestSubscription
+                    ? isMembershipEndPast(latestSubscription.endDate)
+                    : false
+                  const daysLeft = latestSubscription
+                    ? getMembershipDayInfo(latestSubscription.endDate).daysUntilEndInclusive
+                    : 0
                   const isExpiringSoon = daysLeft >= 0 && daysLeft <= 7
                   const initial = member.name.charAt(0).toUpperCase()
                   const planPrice = latestSubscription?.planPriceSnapshot || 0

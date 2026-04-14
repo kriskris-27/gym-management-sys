@@ -577,3 +577,35 @@ export async function listValidSessionsForReport(
   })
 }
 
+/**
+ * Admin day history: all sessions for `sessionDay` range (IST), including auto-closed and open check-outs.
+ * Excludes deleted members only.
+ */
+export async function listSessionsForAttendanceHistory(
+  memberId: string | undefined,
+  startDate: Date | undefined,
+  endDate: Date | undefined
+) {
+  const rangeFilter: Prisma.AttendanceSessionWhereInput = {}
+  if (startDate || endDate) {
+    rangeFilter.sessionDay = {
+      ...(startDate ? { gte: startDate } : {}),
+      ...(endDate ? { lte: endDate } : {}),
+    }
+  }
+
+  const where: Prisma.AttendanceSessionWhereInput = {
+    ...rangeFilter,
+    member: { status: { not: "DELETED" } },
+    ...(memberId ? { memberId } : {}),
+  }
+
+  return prisma.attendanceSession.findMany({
+    where,
+    include: {
+      member: { select: { id: true, name: true, phone: true } },
+    },
+    orderBy: { checkIn: "desc" },
+  })
+}
+

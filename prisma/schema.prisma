@@ -187,20 +187,42 @@ model Setting {
 }
 
 model NotificationLog {
-  id       String   @id @default(cuid())
-  memberId String
-  type     NotificationType
-  status   String
-
-  sentAt   DateTime @default(now())
+  id                 String             @id @default(cuid())
+  memberId           String
+  type               NotificationType
+  status             NotificationStatus
+  runId              String
+  channel            String             @default("WHATSAPP")
+  recipientPhone     String
+  memberNameSnapshot String
+  templateKey        String
+  errorCode          String?
+  errorMessage       String?
+  providerMessageId  String?
+  attemptNumber      Int                @default(1)
+  meta               Json?
+  sentAt             DateTime           @default(now())
 
   member Member @relation(fields: [memberId], references: [id], onDelete: Restrict)
+
+  @@index([memberId])
+  @@index([status])
+  @@index([type])
+  @@index([runId])
+  @@index([sentAt])
+  @@index([type, status, sentAt])
 }
 
 enum NotificationType {
   EXPIRY_5_DAY
   EXPIRY_1_DAY
   INACTIVITY
+}
+
+enum NotificationStatus {
+  SENT
+  FAILED
+  SKIPPED
 }
 
 model AuditLog {

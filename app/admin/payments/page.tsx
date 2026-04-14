@@ -16,6 +16,7 @@ interface Payment {
   id: string
   memberId: string
   memberName: string
+  memberPhone?: string
   amount: number
   mode: "CASH" | "UPI" | "CARD"
   date: string
@@ -30,6 +31,24 @@ interface MemberResult {
 }
 
 type PaymentSummary = MemberFinancials
+
+function digitsOnly(s: string): string {
+  return s.replace(/\D/g, "")
+}
+
+function paymentMatchesSearch(p: Payment, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  if (p.memberName.toLowerCase().includes(q)) return true
+  const phone = p.memberPhone ?? ""
+  if (phone.toLowerCase().includes(q)) return true
+  const qDigits = digitsOnly(query)
+  if (qDigits.length > 0) {
+    const phoneDigits = digitsOnly(phone)
+    if (phoneDigits.includes(qDigits)) return true
+  }
+  return false
+}
 
 function formatPaymentDate(dateStr: string): string {
   if (!dateStr) return "—"
@@ -81,9 +100,8 @@ export default function PaymentsPage() {
   const filtered = payments.filter((p) => {
     // Hide zero-amount payments from the global ledger
     if (p.amount <= 0) return false
-    
-    const matchesSearch = p.memberName.toLowerCase().includes(search.toLowerCase())
-    return matchesSearch
+
+    return paymentMatchesSearch(p, search)
   })
 
   // ─── Stats (same dataset logic as table) ──────────────────────────────────
@@ -353,7 +371,7 @@ export default function PaymentsPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search member..."
+            placeholder="Search name or phone..."
             className="w-full bg-[#111111] border border-[#1C1C1C] text-white text-[13px] pl-9 pr-4 py-2.5 rounded-lg placeholder:text-[#333333] focus:border-[#D11F00] focus:outline-none transition-colors duration-200"
           />
         </div>
@@ -420,7 +438,9 @@ export default function PaymentsPage() {
                 <tr>
                   <td colSpan={6} className="py-16 text-center">
                     <p className="text-[#333333] text-[14px] font-medium">No payments found</p>
-                    <p className="text-[#2A2A2A] text-[12px] mt-1">Try adjusting your filters or date range</p>
+                    <p className="text-[#2A2A2A] text-[12px] mt-1">
+                      Try name, phone, payment mode, or date range
+                    </p>
                   </td>
                 </tr>
               ) : (
@@ -437,10 +457,15 @@ export default function PaymentsPage() {
                           <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-[#1C1C1C] border border-[#242424]">
                             <span className="text-white text-[12px] font-bold">{initial}</span>
                           </div>
-                          <div className="flex flex-col">
-                            <span className="text-white text-[13px] font-medium leading-tight group-hover:text-[#D11F00] transition-colors">
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-white text-[13px] font-medium leading-tight group-hover:text-[#D11F00] transition-colors truncate">
                               {pay.memberName}
                             </span>
+                            {pay.memberPhone ? (
+                              <span className="text-[#555555] text-[11px] mt-0.5 tabular-nums truncate">
+                                {pay.memberPhone}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </td>

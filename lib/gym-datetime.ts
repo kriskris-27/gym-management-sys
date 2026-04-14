@@ -51,12 +51,19 @@ export function getMembershipDayInfo(end: Date | string | null | undefined): Mem
   if (!endZ) return { isPastEnd: false, daysUntilEndInclusive: 0, daysSinceEnd: 0 }
   const now = DateTime.now().setZone(GYM_TIMEZONE)
   const endBoundary = endZ.endOf("day")
-  if (now <= endBoundary) {
-    const days = Math.max(0, Math.ceil(endBoundary.diff(now).as("days")))
-    return { isPastEnd: false, daysUntilEndInclusive: days, daysSinceEnd: 0 }
+  if (now > endBoundary) {
+    const daysAgo = Math.max(
+      0,
+      Math.floor(now.startOf("day").diff(endZ.startOf("day"), "days").days)
+    )
+    return { isPastEnd: true, daysUntilEndInclusive: 0, daysSinceEnd: daysAgo }
   }
-  const daysAgo = Math.max(0, Math.floor(now.diff(endBoundary).as("days")))
-  return { isPastEnd: true, daysUntilEndInclusive: 0, daysSinceEnd: daysAgo }
+  const todayStart = now.startOf("day")
+  const endDayStart = endZ.startOf("day")
+  // Calendar days from start of today (IST) through start of end date (IST).
+  // Matches `start.plus({ days: N })` end labels; avoids Math.ceil on ms (which showed X+1).
+  const daysBetween = Math.round(endDayStart.diff(todayStart, "days").days)
+  return { isPastEnd: false, daysUntilEndInclusive: Math.max(0, daysBetween), daysSinceEnd: 0 }
 }
 
 /** Today's calendar date in the gym zone as `YYYY-MM-DD` (for date inputs). */

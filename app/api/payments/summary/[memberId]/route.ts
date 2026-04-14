@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireAuthUser } from "@/lib/api-auth"
 import { prisma } from "@/lib/prisma"
 import { computeMemberFinancials } from "@/lib/financial-service"
+import { gymYmdFromInstant } from "@/lib/gym-datetime"
 import { lazyExpireStaleSubscriptionsAndSyncMember } from "@/domain/subscription"
 
 export async function GET(
@@ -63,8 +64,8 @@ export async function GET(
       memberName: member.name,
       plan: latestSub?.planNameSnapshot || "N/A",
       // Provide clean strings for frontend presentation
-      startDate: latestSub?.startDate?.toISOString().split("T")[0] || null,
-      endDate: latestSub?.endDate?.toISOString().split("T")[0] || null
+      startDate: latestSub?.startDate ? gymYmdFromInstant(latestSub.startDate) : null,
+      endDate: latestSub?.endDate ? gymYmdFromInstant(latestSub.endDate) : null
     }
 
     console.log(`[Payment Summary API] Response:`, response)
