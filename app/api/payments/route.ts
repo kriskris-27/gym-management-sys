@@ -6,10 +6,8 @@ import type { Prisma } from "@prisma/client"
 import { PaymentCreateSchema } from "@/lib/validations"
 import { GYM_TIMEZONE } from "@/lib/gym-datetime"
 import {
-  assertGlobalPaymentAllowed,
   assertNoCurrentPlanOverpay,
-  computeGlobalMemberLedger,
-  getLivePlanPaymentRemaining,
+  getMemberOutstandingSubscriptionDues,
 } from "@/domain/payment"
 import { lazyExpireStaleSubscriptionsAndSyncMember } from "@/domain/subscription"
 
@@ -171,89 +169,31 @@ export async function POST(request: Request) {
       )
     }
 
-    const globalLedger = await computeGlobalMemberLedger(data.memberId)
-    const globalGuard = assertGlobalPaymentAllowed({
-      amount: data.amount,
-      globalRemaining: globalLedger.remaining,
-    })
-    if (!globalGuard.ok) {
+    const outstanding = await getMemberOutstandingSubscriptionDues(data.memberId)
+    if (outstanding.length === 0) {
       return NextResponse.json(
-        { error: globalGuard.message, code: globalGuard.code },
-        { status: globalGuard.code === "MEMBER_FULLY_PAID" ? 409 : 400 }
+        {
+          error:
+            "No pending subscription dues found. This member is fully paid for existing subscriptions.",
+          code: "NO_PENDING_SUBSCRIPTION_DUE",
+        },
+        { status: 409 }
+      )
+    }
+    const targetDue = outstanding[0]
+    const targetGuard = assertNoCurrentPlanOverpay({
+      amount: data.amount,
+      remaining: targetDue.remaining,
+    })
+    if (!targetGuard.ok) {
+      return NextResponse.json(
+        { error: targetGuard.message, code: targetGuard.code },
+        { status: targetGuard.code === "CURRENT_PLAN_FULLY_PAID" ? 409 : 400 }
       )
     }
 
-    const liveLedger = await getLivePlanPaymentRemaining(data.memberId)
-    const payRounded = Math.round(data.amount)
-
-    let subscriptionId: string | null = null
-    let baseAmount = payRounded
-
-    if (
-      liveLedger.liveSubscriptionId &&
-      liveLedger.remaining > 1 &&
-      payRounded <= liveLedger.remaining + 1
-    ) {
-      const liveGuard = assertNoCurrentPlanOverpay({
-        amount: data.amount,
-        remaining: liveLedger.remaining,
-      })
-      if (!liveGuard.ok) {
-        return NextResponse.json(
-          { error: liveGuard.message, code: liveGuard.code },
-          { status: liveGuard.code === "CURRENT_PLAN_FULLY_PAID" ? 409 : 400 }
-        )
-      }
-      subscriptionId = liveLedger.liveSubscriptionId
-      baseAmount = liveLedger.planAmount
-    } else if (
-      liveLedger.liveSubscriptionId &&
-      liveLedger.remaining > 1 &&
-      payRounded > liveLedger.remaining + 1
-    ) {
-      // More than this plan's share: record against global ledger only (no sub link)
-      subscriptionId = null
-      baseAmount = payRounded
-    } else {
-      // No live plan (expired / no check-in window). If the latest non-cancelled plan
-      // still has dues, auto-attach this payment to that plan so plan-wise history stays correct.
-      const latestSub = await prisma.subscription.findFirst({
-        where: { memberId: data.memberId, status: { not: "CANCELLED" } },
-        orderBy: { createdAt: "desc" },
-        select: { id: true, planPriceSnapshot: true },
-      })
-
-      if (latestSub) {
-        const s = await prisma.payment.aggregate({
-          where: { memberId: data.memberId, subscriptionId: latestSub.id, status: "SUCCESS" },
-          _sum: { finalAmount: true, discountAmount: true },
-        })
-        const paid = Math.round((s._sum.finalAmount || 0) + (s._sum.discountAmount || 0))
-        const planAmount = Math.round(latestSub.planPriceSnapshot || 0)
-        const remaining = Math.max(0, planAmount - paid)
-
-        if (remaining > 1 && payRounded <= remaining + 1) {
-          const planGuard = assertNoCurrentPlanOverpay({
-            amount: data.amount,
-            remaining,
-          })
-          if (!planGuard.ok) {
-            return NextResponse.json(
-              { error: planGuard.message, code: planGuard.code },
-              { status: planGuard.code === "CURRENT_PLAN_FULLY_PAID" ? 409 : 400 }
-            )
-          }
-          subscriptionId = latestSub.id
-          baseAmount = planAmount
-        } else {
-          subscriptionId = null
-          baseAmount = payRounded
-        }
-      } else {
-        subscriptionId = null
-        baseAmount = payRounded
-      }
-    }
+    const subscriptionId: string = targetDue.subscriptionId
+    const baseAmount = targetDue.planAmount
 
     // 2. Insert into Ledger
     const payment = await prisma.payment.create({

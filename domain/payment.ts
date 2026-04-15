@@ -107,6 +107,98 @@ export async function getLivePlanPaymentRemaining(
   }
 }
 
+export async function computeSubscriptionLedger(
+  subscriptionId: string,
+  db: PaymentDb = prisma
+): Promise<{
+  subscriptionId: string
+  memberId: string
+  planAmount: number
+  paid: number
+  discount: number
+  remaining: number
+  isPaidFull: boolean
+}> {
+  const subscription = await db.subscription.findUnique({
+    where: { id: subscriptionId },
+    select: { id: true, memberId: true, planPriceSnapshot: true, status: true },
+  })
+  if (!subscription || subscription.status === "CANCELLED") {
+    throw new Error(`Subscription not found or cancelled: ${subscriptionId}`)
+  }
+
+  const paySummary = await db.payment.aggregate({
+    where: { subscriptionId, status: "SUCCESS" },
+    _sum: { finalAmount: true, discountAmount: true },
+  })
+
+  const planAmount = Math.round(subscription.planPriceSnapshot || 0)
+  const paid = Math.round(paySummary._sum.finalAmount || 0)
+  const discount = Math.round(paySummary._sum.discountAmount || 0)
+  const remaining = Math.max(0, planAmount - (paid + discount))
+
+  return {
+    subscriptionId: subscription.id,
+    memberId: subscription.memberId,
+    planAmount,
+    paid,
+    discount,
+    remaining,
+    isPaidFull: remaining <= 1,
+  }
+}
+
+export async function getMemberOutstandingSubscriptionDues(
+  memberId: string,
+  db: PaymentDb = prisma
+): Promise<
+  Array<{
+    subscriptionId: string
+    status: "ACTIVE" | "EXPIRED" | "CANCELLED"
+    createdAt: Date
+    planNameSnapshot: string
+    planAmount: number
+    paid: number
+    discount: number
+    remaining: number
+  }>
+> {
+  const subscriptions = await db.subscription.findMany({
+    where: { memberId, status: { in: ["ACTIVE", "EXPIRED"] } },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      planNameSnapshot: true,
+      planPriceSnapshot: true,
+      payments: {
+        where: { status: "SUCCESS" },
+        select: { finalAmount: true, discountAmount: true },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  })
+
+  return subscriptions
+    .map((sub) => {
+      const paid = Math.round(sub.payments.reduce((acc, p) => acc + p.finalAmount, 0))
+      const discount = Math.round(sub.payments.reduce((acc, p) => acc + p.discountAmount, 0))
+      const planAmount = Math.round(sub.planPriceSnapshot || 0)
+      const remaining = Math.max(0, planAmount - (paid + discount))
+      return {
+        subscriptionId: sub.id,
+        status: sub.status,
+        createdAt: sub.createdAt,
+        planNameSnapshot: sub.planNameSnapshot,
+        planAmount,
+        paid,
+        discount,
+        remaining,
+      }
+    })
+    .filter((row) => row.remaining > 1)
+}
+
 export interface Payment {
   id: string
   memberId: string

@@ -1,6 +1,6 @@
 import prisma from "@/lib/prisma"
 import type { PaymentMethod, Prisma } from "@prisma/client"
-import { computeGlobalMemberLedger } from "./payment"
+import { getMemberOutstandingSubscriptionDues } from "./payment"
 import {
   expireStaleActiveSubscriptionsForMember,
   findLiveSubscription,
@@ -234,11 +234,13 @@ async function validateActionPreconditions(memberId: string, action: MemberActio
 }
 
 async function applyRenewOutstandingGuard(tx: Tx, memberId: string) {
-  const { remaining } = await computeGlobalMemberLedger(memberId, tx)
-  if (remaining > 1) {
+  const outstandingSubscriptions = await getMemberOutstandingSubscriptionDues(memberId, tx)
+  if (outstandingSubscriptions.length > 0) {
+    const totalPending = outstandingSubscriptions.reduce((acc, row) => acc + row.remaining, 0)
+    const oldestDue = outstandingSubscriptions[outstandingSubscriptions.length - 1]
     throw new MemberLifecycleError(
       403,
-      `Cannot renew: Member has an outstanding balance of ₹${remaining}. Please clear previous dues first.`,
+      `Cannot renew: old dues of ₹${totalPending} are pending. Oldest unpaid plan is '${oldestDue.planNameSnapshot}' (₹${oldestDue.remaining}). Please clear previous dues first.`,
       "OUTSTANDING_BALANCE"
     )
   }
