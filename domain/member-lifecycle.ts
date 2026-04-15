@@ -50,16 +50,23 @@ export async function restoreMember(memberId: string) {
     throw new MemberLifecycleError(400, "Member is not deleted", "NOT_DELETED")
   }
 
-  const restored = await prisma.member.update({
-    where: { id: memberId },
-    data: { status: "ACTIVE" },
+  const restored = await prisma.$transaction(async (tx) => {
+    // Ensure restored members never retain operational old plans.
+    await tx.subscription.updateMany({
+      where: { memberId, status: { not: "CANCELLED" } },
+      data: { status: "CANCELLED" },
+    })
+    return tx.member.update({
+      where: { id: memberId },
+      data: { status: "INACTIVE" },
+    })
   })
   const syncedStatus = await syncMemberOperationalStatus(memberId)
   return { ...restored, status: syncedStatus }
 }
 
 /**
- * Soft-delete: expire all ACTIVE subscriptions for the member, then mark member DELETED.
+ * Soft-delete: cancel all non-cancelled subscriptions for the member, then mark member DELETED.
  */
 export async function softDeleteMember(memberId: string) {
   const member = await prisma.member.findUnique({ where: { id: memberId } })
@@ -72,8 +79,8 @@ export async function softDeleteMember(memberId: string) {
 
   await prisma.$transaction(async (tx) => {
     await tx.subscription.updateMany({
-      where: { memberId, status: "ACTIVE" },
-      data: { status: "EXPIRED" },
+      where: { memberId, status: { not: "CANCELLED" } },
+      data: { status: "CANCELLED" },
     })
 
     await tx.member.update({
@@ -109,6 +116,14 @@ export async function getCanReopenLastPlan(memberId: string): Promise<boolean> {
     select: { status: true },
   })
   if (!member || member.status === "DELETED") return false
+  const hasSoftDeleteHistory = await prisma.auditLog.count({
+    where: {
+      entityType: "MEMBER",
+      entityId: memberId,
+      action: "SOFT_DELETED",
+    },
+  })
+  if (hasSoftDeleteHistory > 0) return false
 
   const activeRows = await prisma.subscription.count({
     where: { memberId, status: "ACTIVE" },
@@ -141,6 +156,20 @@ export async function reopenLastExpiredPlanIfEligible(memberId: string) {
       "MEMBER_DELETED"
     )
   }
+  const hasSoftDeleteHistory = await prisma.auditLog.count({
+    where: {
+      entityType: "MEMBER",
+      entityId: memberId,
+      action: "SOFT_DELETED",
+    },
+  })
+  if (hasSoftDeleteHistory > 0) {
+    throw new MemberLifecycleError(
+      400,
+      "Old plans cannot be reopened after delete/restore. Please use Add Plan/Renew.",
+      "REOPEN_BLOCKED_AFTER_SOFT_DELETE"
+    )
+  }
 
   const activeRows = await prisma.subscription.count({
     where: { memberId, status: "ACTIVE" },
@@ -167,7 +196,7 @@ export async function reopenLastExpiredPlanIfEligible(memberId: string) {
   if (target.status === "CANCELLED") {
     throw new MemberLifecycleError(
       400,
-      "Latest plan is cancelled. Use Add Plan instead of reopen.",
+      "Latest plan is cancelled. Use Add Plan/Renew instead of reopen.",
       "LATEST_PLAN_CANCELLED"
     )
   }
@@ -269,23 +298,12 @@ export async function renewMemberPlan(memberId: string, payload: RenewPayload) {
     if (payload.action === "renew") {
       await applyRenewOutstandingGuard(tx, memberId)
 
-      const cancelledSubs = await tx.subscription.findMany({
-        where: { memberId, status: "CANCELLED" },
-        include: { payments: true },
-      })
-      for (const sub of cancelledSubs) {
-        const paidSum = sub.payments.reduce(
-          (acc, p) => acc + (p.status === "SUCCESS" ? p.finalAmount + p.discountAmount : 0),
-          0
-        )
-        await tx.subscription.update({
-          where: { id: sub.id },
-          data: { status: "EXPIRED", planPriceSnapshot: paidSum },
-        })
-      }
-
       const expiredSub = await tx.subscription.findFirst({
-        where: { memberId, status: "EXPIRED" },
+        where: {
+          memberId,
+          status: "EXPIRED",
+          endDate: { lte: nowInstant.toJSDate() },
+        },
         orderBy: { endDate: "desc" },
       })
       if (expiredSub?.endDate) {

@@ -13,6 +13,22 @@ export { computePaymentFromBase } from "./payment-calculation"
 /** Prisma client or transaction — same aggregates for global ledger. */
 export type PaymentDb = typeof prisma | Prisma.TransactionClient
 
+async function getOperationalLedgerAnchor(
+  memberId: string,
+  db: PaymentDb = prisma
+): Promise<Date | null> {
+  const latestDelete = await db.auditLog.findFirst({
+    where: {
+      entityType: "MEMBER",
+      entityId: memberId,
+      action: "SOFT_DELETED",
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  })
+  return latestDelete?.createdAt ?? null
+}
+
 /**
  * Global ledger: sum(non-cancelled subscription planPriceSnapshot) vs SUCCESS payments + discounts.
  * Used by financial summary UI and renew guard so rules cannot drift.
@@ -27,12 +43,26 @@ export async function computeGlobalMemberLedger(
   remaining: number
   isPaidFull: boolean
 }> {
+  const anchor = await getOperationalLedgerAnchor(memberId, db)
+  const anchorFilter = anchor ? { createdAt: { gte: anchor } } : {}
+
   const subSummary = await db.subscription.aggregate({
-    where: { memberId, status: { not: "CANCELLED" } },
+    where: { memberId, status: { not: "CANCELLED" }, ...anchorFilter },
     _sum: { planPriceSnapshot: true },
   })
   const paySummary = await db.payment.aggregate({
-    where: { memberId, status: "SUCCESS" },
+    where: anchor
+      ? {
+          memberId,
+          status: "SUCCESS",
+          OR: [
+            // Preferred: payments linked to subscriptions created in the current operational cycle.
+            { subscription: { createdAt: { gte: anchor } } },
+            // Legacy/orphan rows still rely on their own timestamp.
+            { subscriptionId: null, createdAt: { gte: anchor } },
+          ],
+        }
+      : { memberId, status: "SUCCESS" },
     _sum: { finalAmount: true, discountAmount: true },
   })
   const totalAmount = subSummary._sum.planPriceSnapshot || 0
@@ -76,13 +106,17 @@ export async function getLivePlanPaymentRemaining(
       remaining: 0,
     }
   }
+  // Keep current-plan card aligned with operational ledger semantics after soft delete.
+  const anchor = await getOperationalLedgerAnchor(memberId, db)
+  const orphanAnchorFilter = anchor ? { createdAt: { gte: anchor } } : {}
   const [linked, orphan] = await Promise.all([
     db.payment.aggregate({
+      // Count all payments linked to the live subscription, even if entry date was backfilled.
       where: { memberId, subscriptionId: live.id, status: "SUCCESS" },
       _sum: { finalAmount: true, discountAmount: true },
     }),
     db.payment.aggregate({
-      where: { memberId, subscriptionId: null, status: "SUCCESS" },
+      where: { memberId, subscriptionId: null, status: "SUCCESS", ...orphanAnchorFilter },
       _sum: { finalAmount: true, discountAmount: true },
     }),
   ])
@@ -163,8 +197,14 @@ export async function getMemberOutstandingSubscriptionDues(
     remaining: number
   }>
 > {
+  const anchor = await getOperationalLedgerAnchor(memberId, db)
+  const anchorFilter = anchor ? { createdAt: { gte: anchor } } : {}
   const subscriptions = await db.subscription.findMany({
-    where: { memberId, status: { in: ["ACTIVE", "EXPIRED"] } },
+    where: {
+      memberId,
+      status: { in: ["ACTIVE", "EXPIRED"] },
+      ...anchorFilter,
+    },
     select: {
       id: true,
       status: true,
@@ -172,6 +212,7 @@ export async function getMemberOutstandingSubscriptionDues(
       planNameSnapshot: true,
       planPriceSnapshot: true,
       payments: {
+        // Subscriptions are already scoped by cycle anchor; count all payments linked to them.
         where: { status: "SUCCESS" },
         select: { finalAmount: true, discountAmount: true },
       },
@@ -558,17 +599,7 @@ export async function batchGetMemberListFinancialSummaries(
     result.set(id, emptyMemberListFinancialSummary())
   }
 
-  const [subTotals, payTotals, nonCancelledSubs, activeSubs, payBySub] = await Promise.all([
-    prisma.subscription.groupBy({
-      by: ["memberId"],
-      where: { memberId: { in: memberIds }, status: { not: "CANCELLED" } },
-      _sum: { planPriceSnapshot: true },
-    }),
-    prisma.payment.groupBy({
-      by: ["memberId"],
-      where: { memberId: { in: memberIds }, status: "SUCCESS" },
-      _sum: { finalAmount: true, discountAmount: true },
-    }),
+  const [nonCancelledSubs, activeSubs, payBySub, paymentRows, deleteRows] = await Promise.all([
     prisma.subscription.findMany({
       where: { memberId: { in: memberIds }, status: { not: "CANCELLED" } },
       select: {
@@ -601,29 +632,82 @@ export async function batchGetMemberListFinancialSummaries(
       },
       _sum: { finalAmount: true, discountAmount: true },
     }),
+    prisma.payment.findMany({
+      where: { memberId: { in: memberIds }, status: "SUCCESS" },
+      select: {
+        memberId: true,
+        subscriptionId: true,
+        finalAmount: true,
+        discountAmount: true,
+        createdAt: true,
+      },
+    }),
+    prisma.auditLog.findMany({
+      where: {
+        entityType: "MEMBER",
+        action: "SOFT_DELETED",
+        entityId: { in: memberIds },
+      },
+      select: { entityId: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    }),
   ])
 
-  for (const row of subTotals) {
-    const r = result.get(row.memberId)
+  const anchorByMember = new Map<string, Date>()
+  for (const row of deleteRows) {
+    if (!anchorByMember.has(row.entityId)) {
+      anchorByMember.set(row.entityId, row.createdAt)
+    }
+  }
+
+  const isAfterAnchor = (memberId: string, at: Date) => {
+    const anchor = anchorByMember.get(memberId)
+    if (!anchor) return true
+    return at >= anchor
+  }
+
+  for (const sub of nonCancelledSubs) {
+    if (!isAfterAnchor(sub.memberId, sub.createdAt)) continue
+    const r = result.get(sub.memberId)
     if (!r) continue
-    const totalAmount = row._sum.planPriceSnapshot || 0
-    r.totalAmount = totalAmount
-    r.globalTotalAmount = totalAmount
+    const amount = sub.planPriceSnapshot || 0
+    r.totalAmount += amount
+    r.globalTotalAmount += amount
+  }
+
+  const operationalSubIdsByMember = new Map<string, Set<string>>()
+  for (const sub of nonCancelledSubs) {
+    if (!isAfterAnchor(sub.memberId, sub.createdAt)) continue
+    const set = operationalSubIdsByMember.get(sub.memberId) ?? new Set<string>()
+    set.add(sub.id)
+    operationalSubIdsByMember.set(sub.memberId, set)
   }
 
   const payByMember = new Map<string, { final: number; disc: number }>()
-  for (const row of payTotals) {
-    payByMember.set(row.memberId, {
-      final: row._sum.finalAmount || 0,
-      disc: row._sum.discountAmount || 0,
-    })
+  for (const row of payBySub) {
+    if (!row.subscriptionId) continue
+    const operationalSubs = operationalSubIdsByMember.get(row.memberId)
+    if (!operationalSubs || !operationalSubs.has(row.subscriptionId)) continue
+    const curr = payByMember.get(row.memberId) ?? { final: 0, disc: 0 }
+    curr.final += row._sum.finalAmount || 0
+    curr.disc += row._sum.discountAmount || 0
+    payByMember.set(row.memberId, curr)
+  }
+  for (const p of paymentRows) {
+    // Keep orphan payments timestamp-filtered because they are not linked to a subscription row.
+    if (p.subscriptionId !== null) continue
+    if (!isAfterAnchor(p.memberId, p.createdAt)) continue
+    const curr = payByMember.get(p.memberId) ?? { final: 0, disc: 0 }
+    curr.final += p.finalAmount
+    curr.disc += p.discountAmount
+    payByMember.set(p.memberId, curr)
   }
 
   for (const id of memberIds) {
     const r = result.get(id)!
     const pay = payByMember.get(id) ?? { final: 0, disc: 0 }
-    r.totalPaid = pay.final
-    r.globalTotalPaid = pay.final
+    r.totalPaid = Math.round(pay.final)
+    r.globalTotalPaid = Math.round(pay.final)
     r.remaining = Math.round(r.totalAmount - (pay.final + pay.disc))
     r.globalRemaining = r.remaining
     r.isPaidFull = r.remaining <= 1
@@ -631,6 +715,7 @@ export async function batchGetMemberListFinancialSummaries(
 
   const ncByMember = new Map<string, typeof nonCancelledSubs>()
   for (const s of nonCancelledSubs) {
+    if (!isAfterAnchor(s.memberId, s.createdAt)) continue
     const arr = ncByMember.get(s.memberId) ?? []
     arr.push(s)
     ncByMember.set(s.memberId, arr)
@@ -641,6 +726,7 @@ export async function batchGetMemberListFinancialSummaries(
 
   const activeByMember = new Map<string, typeof activeSubs>()
   for (const s of activeSubs) {
+    if (!isAfterAnchor(s.memberId, s.createdAt)) continue
     const arr = activeByMember.get(s.memberId) ?? []
     arr.push(s)
     activeByMember.set(s.memberId, arr)

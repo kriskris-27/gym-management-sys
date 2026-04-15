@@ -154,7 +154,10 @@ export default function MemberProfilePage() {
               : "NEEDS_PLAN")
   const needsPlan = planUiState === "NEEDS_PLAN"
   const isDeletedMember = member?.status === "DELETED"
-  const isAddPlanMode = Boolean(isDeletedMember || needsPlan)
+  const isCancelledPlan = planUiState === "CANCELLED"
+  const isAddPlanMode = Boolean(isDeletedMember || needsPlan || isCancelledPlan)
+  const shouldAnchorRenewFromPreviousEnd =
+    !isDeletedMember && !isCancelledPlan && planUiState === "EXPIRED" && endInfo.isPastEnd
 
   // Debug paymentSummary changes
   useEffect(() => {
@@ -353,7 +356,15 @@ export default function MemberProfilePage() {
       } else {
         const errorData = await res.json()
         console.error("[Payment Submit] Error response:", errorData)
-        setPaymentError(errorData.error || "Failed to save payment")
+        if (errorData?.code === "NO_PENDING_SUBSCRIPTION_DUE") {
+          // Bring UI in sync when backend confirms there is no payable due.
+          queryClient.refetchQueries({ queryKey: ["payments"] })
+          queryClient.refetchQueries({ queryKey: ["payments", "summary", id] })
+          queryClient.refetchQueries({ queryKey: ["member", id] })
+          setPaymentError("No pending due for the current cycle. Refreshed latest payment summary.")
+        } else {
+          setPaymentError(errorData.error || "Failed to save payment")
+        }
       }
     } catch (e) {
       console.error("[Payment Submit] Exception caught:", e)
@@ -458,13 +469,11 @@ export default function MemberProfilePage() {
       resetRenewal({
         membershipType:
           member.membershipType && member.membershipType !== "NONE" ? member.membershipType : "MONTHLY",
-        startDate: isAddPlanMode
-          ? getTodayStr()
-          : toYmd(member.endDate),
+        startDate: shouldAnchorRenewFromPreviousEnd ? toYmd(member.endDate) : getTodayStr(),
         customPrice: undefined,
       })
     }
-  }, [member, showRenewalModal, resetRenewal, isAddPlanMode])
+  }, [member, showRenewalModal, resetRenewal, shouldAnchorRenewFromPreviousEnd])
 
   const onRenewalSubmit = async (data: RenewalFormData) => {
     try {
@@ -520,7 +529,9 @@ export default function MemberProfilePage() {
           errorData?.error ||
             (res.status === 403
               ? "Cannot add this plan: member still has pending dues. Clear the previous balance first."
-              : "Failed to renew membership")
+              : isAddPlanMode
+                ? "Failed to add plan"
+                : "Failed to renew membership")
         )
       }
     } catch (e) {
@@ -561,13 +572,12 @@ export default function MemberProfilePage() {
   }
 
   const isLivePlan = planUiState === "LIVE"
-  const isCancelledPlan = planUiState === "CANCELLED"
   const isExpiredPlan = planUiState === "EXPIRED"
   const daysUntilEnd = endInfo.daysUntilEndInclusive
   const daysSinceEnd = endInfo.daysSinceEnd
   const isExpiringSoon =
     isLivePlan && !endInfo.isPastEnd && daysUntilEnd >= 0 && daysUntilEnd <= 7
-  const shouldShowRenew = !isDeletedMember && isExpiredPlan && endInfo.isPastEnd
+  const shouldShowRenew = shouldAnchorRenewFromPreviousEnd
   const showReopenLastPlan =
     !isDeletedMember &&
     !isLivePlan &&
@@ -632,7 +642,7 @@ export default function MemberProfilePage() {
               {isDeletedMember
                 ? "Add a new plan to restore this member back to ACTIVE."
                 : isCancelledPlan
-                ? "Use Add Plan to assign a new plan — previous payments count toward the global balance."
+                ? "Use Add Plan to assign a new plan for the current cycle."
                 : isExpiredPlan && endInfo.isPastEnd
                   ? `Expired on ${formatMemberDate(member.endDate)}`
                   : "Member needs a plan assignment to record attendance."}
@@ -657,7 +667,7 @@ export default function MemberProfilePage() {
                 <span>Renew Plan</span>
               </button>
             )}
-            {!shouldShowRenew && !isCancelledPlan && (
+            {!shouldShowRenew && (
               <>
                 {showReopenLastPlan && (
                   <button
@@ -788,7 +798,7 @@ export default function MemberProfilePage() {
                   {formatRupeeStatCard(paymentSummary.totalAmount)}
                 </p>
               )}
-              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">lifetime ledger across all non-cancelled plans</p>
+              <p className="text-[#333333] text-[11px] font-medium leading-tight mt-0.5">current active cycle ledger (resets after soft delete)</p>
             </div>
 
             {/* CELL 2 */}
@@ -1134,9 +1144,12 @@ export default function MemberProfilePage() {
           {payments.length > 0 && (
             <div className="border-t border-[#1C1C1C] px-6 py-4 flex items-center justify-between bg-[#0A0A0A]">
               <div>
-                <span className="text-[#444444] font-bold uppercase tracking-wider text-[11px]">Total Paid</span>
+                <span className="text-[#444444] font-bold uppercase tracking-wider text-[11px]">All-time Paid (Audit)</span>
                 <p className="text-[#666666] text-[11px] mt-1">
                   Discount Applied: ₹{payments.reduce((sum: number, p: PaymentRecord) => sum + (p.discountAmount || 0), 0).toLocaleString("en-IN")}
+                </p>
+                <p className="text-[#444444] text-[10px] mt-1">
+                  Includes historical payments from previous deleted cycles.
                 </p>
               </div>
               <span className="text-white font-black text-[16px]">

@@ -243,7 +243,6 @@ export async function PUT(
           phoneNormalized: updateData.phone
             ? updateData.phone.replace(/\D/g, "")
             : undefined,
-          status: updateData.status === "DELETED" ? "DELETED" : undefined,
         },
         select: {
           id: true,

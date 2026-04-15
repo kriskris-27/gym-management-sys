@@ -122,7 +122,7 @@ export const MemberCreateSchema = z.object({
 
 /**
  * Member Update (Partial updates, id required).
- * `status` may only be set to DELETED (soft-delete via PUT). ACTIVE/INACTIVE are derived from subscriptions.
+ * Status transitions are lifecycle-only (DELETE/PATCH actions), never generic PUT.
  */
 export const MemberUpdateSchema = z.object({
   id: z.string().min(1, "Member ID is required"),
@@ -138,7 +138,6 @@ export const MemberUpdateSchema = z.object({
   membershipType: MembershipTypeEnum.optional(),
   startDate: zodCoerceGymDayOptional,
   endDate: zodCoerceGymDayOptional,
-  status: z.literal("DELETED").optional(),
   discountAmount: z.preprocess(
     (val) => (val === "" || val === null || val === undefined) ? 0 : Number(val),
     z.number().min(0, "Discount cannot be negative").max(99999, "Discount too high").optional()
