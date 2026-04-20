@@ -6,7 +6,7 @@ import { useMembers } from "@/hooks/useMembers"
 import { useRestoreMember } from "@/hooks/useRestoreMember"
 import SpeedLoader from "@/app/components/SpeedLoader"
 import { adminPageLoadingClass, adminPageShellClass } from "@/app/components/admin-page-shell"
-import { formatMemberDate, getMembershipDayInfo, isMembershipEndPast } from "@/lib/gym-datetime"
+import { formatMemberDate, getMembershipDayInfo } from "@/lib/gym-datetime"
 
 interface Member {
   id: string
@@ -17,7 +17,20 @@ interface Member {
   totalAmount: number
   totalPaid: number
   remaining: number
+  currentPlanAmount: number
+  currentPlanPaid: number
+  currentPlanRemaining: number
+  planUiState: "LIVE" | "CANCELLED" | "EXPIRED" | "NEEDS_PLAN"
+  displaySubscription?: {
+    id: string
+    startDate: string
+    endDate: string
+    status: string
+    planNameSnapshot: string
+    planPriceSnapshot?: number
+  } | null
   subscriptions?: Array<{
+    id?: string
     startDate: string
     endDate: string
     status: string
@@ -97,7 +110,7 @@ export default function MembersPage() {
   }
 
   const planCounts = members.reduce((acc, m) => {
-    const pName = m.subscriptions?.[0]?.planNameSnapshot || "OTHERS"
+    const pName = m.displaySubscription?.planNameSnapshot || "OTHERS"
     const standard = ["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"]
     const bucket = standard.includes(pName) ? pName : "OTHERS"
     acc[bucket] = (acc[bucket] ?? 0) + 1
@@ -117,25 +130,25 @@ export default function MembersPage() {
     const matchesPlan =
       planFilter === "All Plans" ? true :
       planFilter === "Others"
-        ? !["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"].includes(m.subscriptions?.[0]?.planNameSnapshot || "")
-        : m.subscriptions?.[0]?.planNameSnapshot === planMap[planFilter]
+        ? !["MONTHLY", "QUARTERLY", "HALF_YEARLY", "ANNUAL"].includes(m.displaySubscription?.planNameSnapshot || "")
+        : m.displaySubscription?.planNameSnapshot === planMap[planFilter]
 
     return matchesSearch && matchesStatus && matchesPlan
   })
 
   const paidCount = filteredWithoutPayment.filter(
-    m => m.isPaidFull
+    m => m.currentPlanAmount <= 0 || m.currentPlanRemaining <= 1
   ).length
   const unpaidCount = filteredWithoutPayment.filter(
-    m => !m.isPaidFull && m.remaining > 0
+    m => m.currentPlanAmount > 0 && m.currentPlanRemaining > 1
   ).length
 
   const filtered = filteredWithoutPayment.filter(m => {
     // Payment filter
     const matchesPayment =
       paymentFilter === "All Payments" ? true :
-        paymentFilter === "Paid" ? m.isPaidFull :
-          paymentFilter === "Unpaid" ? !m.isPaidFull :
+        paymentFilter === "Paid" ? m.currentPlanAmount <= 0 || m.currentPlanRemaining <= 1 :
+          paymentFilter === "Unpaid" ? m.currentPlanAmount > 0 && m.currentPlanRemaining > 1 :
             true
 
     return matchesPayment
@@ -306,41 +319,47 @@ export default function MembersPage() {
               ) : (
                 /* DATA ROWS */
                 filtered.map(member => {
-                  // Get subscription info from the latest subscription
-                  const latestSubscription = member.subscriptions?.[0]
-                  const isExpired = latestSubscription
-                    ? isMembershipEndPast(latestSubscription.endDate)
-                    : false
-                  const daysLeft = latestSubscription
-                    ? getMembershipDayInfo(latestSubscription.endDate).daysUntilEndInclusive
+                  const displaySubscription = member.displaySubscription
+                  const isExpired = member.planUiState === "EXPIRED"
+                  const isLivePlan = member.planUiState === "LIVE"
+                  const isCancelled = member.planUiState === "CANCELLED"
+                  const daysLeft = displaySubscription
+                    ? getMembershipDayInfo(displaySubscription.endDate).daysUntilEndInclusive
                     : 0
-                  const isExpiringSoon = daysLeft >= 0 && daysLeft <= 7
+                  const isExpiringSoon = isLivePlan && daysLeft >= 0 && daysLeft <= 7
                   const initial = member.name.charAt(0).toUpperCase()
-                  const planPrice = latestSubscription?.planPriceSnapshot || 0
 
                   // Membership status badge
-                  const membershipBadge = isExpired ? (
+                  const membershipBadge = isLivePlan ? (
+                    <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">
+                      Active
+                    </span>
+                  ) : isCancelled ? (
+                    <span className="inline-block bg-[#F59E0B]/10 text-[#F59E0B] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#F59E0B]/20">
+                      Cancelled
+                    </span>
+                  ) : isExpired ? (
                     <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">
                       Expired
                     </span>
                   ) : (
-                    <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">
-                      Active
+                    <span className="inline-block bg-[#1C1C1C] text-[#555555] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#2A2A2A]">
+                      Needs Plan
                     </span>
                   )
 
                   // Payment status badge
-                  const paymentBadge = member.isPaidFull ? (
+                  const paymentBadge = member.currentPlanAmount <= 0 ? (
+                    <span className="inline-block bg-[#1C1C1C] text-[#555555] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#2A2A2A]">
+                      Free
+                    </span>
+                  ) : member.currentPlanRemaining <= 1 ? (
                     <span className="inline-block bg-[#10B981]/10 text-[#10B981] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#10B981]/20">
                       Paid
                     </span>
-                  ) : member.remaining > 0 ? (
+                  ) : member.currentPlanRemaining > 0 ? (
                     <span className="inline-block bg-[#D11F00]/10 text-[#D11F00] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#D11F00]/20">
-                      ₹{member.remaining.toLocaleString('en-IN')} due
-                    </span>
-                  ) : planPrice === 0 ? (
-                    <span className="inline-block bg-[#1C1C1C] text-[#555555] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#2A2A2A]">
-                      Free
+                      ₹{member.currentPlanRemaining.toLocaleString('en-IN')} due
                     </span>
                   ) : (
                     <span className="inline-block bg-[#444444]/10 text-[#888888] text-[11px] px-2.5 py-1 rounded-md font-medium border border-[#444444]/20">
@@ -357,7 +376,7 @@ export default function MembersPage() {
 
                   // Plan badge logic
                   const isPremiumPlan =
-                    latestSubscription?.planNameSnapshot === "ANNUAL"
+                    displaySubscription?.planNameSnapshot === "ANNUAL"
                   const planBadgeClass = isPremiumPlan
                     ? "bg-[#D11F00]/10 text-[#D11F00] border border-[#D11F00]/20"
                     : "bg-[#1C1C1C] text-[#888888] border border-[#242424]"
@@ -392,21 +411,21 @@ export default function MembersPage() {
                       {/* PLAN COLUMN */}
                       <td className="px-5 py-4">
                         <span className={`inline-block text-[11px] px-2.5 py-1 rounded-md font-medium ${planBadgeClass}`}>
-                          {formatPlan(latestSubscription?.planNameSnapshot || "OTHERS")}
+                          {formatPlan(displaySubscription?.planNameSnapshot || "OTHERS")}
                         </span>
                       </td>
 
                       {/* START DATE */}
                       <td className="px-5 py-4">
                         <span className="text-[#666666] text-[12px]">
-                          {formatDate(latestSubscription?.startDate || "")}
+                          {formatDate(displaySubscription?.startDate || "")}
                         </span>
                       </td>
 
                       {/* EXPIRES DATE */}
                       <td className="px-5 py-4">
                         <span className={`text-[12px] font-medium ${expiresColorClass}`}>
-                          {formatDate(latestSubscription?.endDate || "")}
+                          {formatDate(displaySubscription?.endDate || "")}
                         </span>
                       </td>
 

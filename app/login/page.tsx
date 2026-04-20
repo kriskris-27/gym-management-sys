@@ -29,10 +29,12 @@ export default function LoginPage() {
     resolver: zodResolver(schema)
   })
 
-  // On mount → check already logged in
+  // On mount → check already logged in (lightweight; avoids false negatives on dashboard 5xx)
   useEffect(() => {
-    fetch("/api/dashboard/summary", { credentials: 'include' })
-      .then(res => { if (res.ok) router.push("/admin/dashboard") })
+    fetch("/api/auth/session", { credentials: "include" })
+      .then((res) => {
+        if (res.ok) router.push("/admin/dashboard")
+      })
       .catch(() => {})
   }, [router])
 

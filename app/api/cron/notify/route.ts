@@ -2,11 +2,13 @@ import { NextResponse } from "next/server"
 import prisma from "@/lib/prisma"
 import { computeGlobalMemberLedger } from "@/domain/payment"
 import { gymNow, gymYmdFromInstant } from "@/lib/gym-datetime"
+import { sendMemberWhatsAppNotification } from "@/lib/whatsapp-cloud"
 import type { NotificationStatus, NotificationType } from "@prisma/client"
 import type { Prisma } from "@prisma/client"
 
 /** Pro / higher plans allow longer runs; Hobby caps lower. */
 export const maxDuration = 60
+const NOTIFY_JOB_LOCK_KEY = 90421051
 
 /** Vercel Cron invokes GET; manual runs may use POST. Both require CRON_SECRET. */
 function verifyCronAuth(request: Request): NextResponse | null {
@@ -26,11 +28,28 @@ function verifyCronAuth(request: Request): NextResponse | null {
 }
 
 /**
- * Daily job: (1) WhatsApp-style expiry reminders — subscriptions ending in 5 days and in 1 day;
+ * Daily job: (1) WhatsApp expiry reminders — subscriptions ending in 5 days and in 1 day;
  * (2) inactivity nudge — active members with no check-in in 4 days (or never visited & account >4d old).
  * Expiry: always reminds to renew; if ledger shows due > 0, also asks to clear pending dues. Dedupes via NotificationLog.
  */
 async function runNotifyJob(): Promise<NextResponse> {
+  let hasLock = false
+  try {
+    const lockRows = await prisma.$queryRaw<Array<{ locked: boolean }>>`
+      SELECT pg_try_advisory_lock(${NOTIFY_JOB_LOCK_KEY}) AS locked
+    `
+    hasLock = !!lockRows[0]?.locked
+    if (!hasLock) {
+      return NextResponse.json(
+        { error: "Notification job is already running", code: "JOB_ALREADY_RUNNING" },
+        { status: 409 }
+      )
+    }
+  } catch (error) {
+    console.error("❌ Failed to acquire notification job lock:", error)
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+  }
+
   const now = gymNow().toUTC().toJSDate()
   const runId = `run-${Date.now()}`
   const startOfToday = gymNow().startOf("day").toUTC().toJSDate()
@@ -142,7 +161,7 @@ async function runNotifyJob(): Promise<NextResponse> {
         if (dueAmount > 0) stats.withPendingDue.tagged++
 
         const expiryDate = gymYmdFromInstant(c.endDate)
-        const result = await sendWhatsAppStub(m.phone, "EXPIRY_5_DAY", m.name, {
+        const result = await sendMemberWhatsAppNotification(m.phone, "EXPIRY_5_DAY", m.name, {
           expiryDate,
           dueAmount,
         })
@@ -156,7 +175,7 @@ async function runNotifyJob(): Promise<NextResponse> {
           providerMessageId: result.providerMessageId,
           errorCode: result.errorCode,
           errorMessage: result.errorMessage,
-          meta: { expiryDate, dueAmount },
+          meta: { expiryDate, dueAmount, whatsappMode: result.mode },
         })
         if (result.ok) stats.expiry5Day.sent++
         else stats.expiry5Day.failed++
@@ -222,7 +241,7 @@ async function runNotifyJob(): Promise<NextResponse> {
         if (dueAmount > 0) stats.withPendingDue.tagged++
 
         const expiryDate = gymYmdFromInstant(c.endDate)
-        const result = await sendWhatsAppStub(m.phone, "EXPIRY_1_DAY", m.name, {
+        const result = await sendMemberWhatsAppNotification(m.phone, "EXPIRY_1_DAY", m.name, {
           expiryDate,
           dueAmount,
         })
@@ -236,7 +255,7 @@ async function runNotifyJob(): Promise<NextResponse> {
           providerMessageId: result.providerMessageId,
           errorCode: result.errorCode,
           errorMessage: result.errorMessage,
-          meta: { expiryDate, dueAmount },
+          meta: { expiryDate, dueAmount, whatsappMode: result.mode },
         })
         if (result.ok) stats.expiry1Day.sent++
         else stats.expiry1Day.failed++
@@ -334,7 +353,7 @@ async function runNotifyJob(): Promise<NextResponse> {
           continue
         }
 
-        const result = await sendWhatsAppStub(m.phone, "INACTIVITY", m.name)
+        const result = await sendMemberWhatsAppNotification(m.phone, "INACTIVITY", m.name)
         await writeLog({
           memberId: m.id,
           memberName: m.name,
@@ -345,7 +364,7 @@ async function runNotifyJob(): Promise<NextResponse> {
           providerMessageId: result.providerMessageId,
           errorCode: result.errorCode,
           errorMessage: result.errorMessage,
-          meta: { lastVisit: lastVisit.toISOString() },
+          meta: { lastVisit: lastVisit.toISOString(), whatsappMode: result.mode },
         })
         if (result.ok) stats.inactivity.sent++
         else stats.inactivity.failed++
@@ -363,6 +382,16 @@ async function runNotifyJob(): Promise<NextResponse> {
   } catch (error) {
     console.error("❌ CRON Execution Failure:", error)
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
+  } finally {
+    if (hasLock) {
+      try {
+        await prisma.$queryRaw<Array<{ unlocked: boolean }>>`
+          SELECT pg_advisory_unlock(${NOTIFY_JOB_LOCK_KEY}) AS unlocked
+        `
+      } catch (unlockErr) {
+        console.error("❌ Failed to release notification job lock:", unlockErr)
+      }
+    }
   }
 }
 
@@ -378,43 +407,3 @@ export async function GET(request: Request) {
   return runNotifyJob()
 }
 
-/**
- * WhatsApp Delivery Engine (Stub Version)
- * Real API integration point for production.
- */
-async function sendWhatsAppStub(
-  phone: string, 
-  type: "EXPIRY_5_DAY" | "EXPIRY_1_DAY" | "INACTIVITY", 
-  memberName: string, 
-  meta?: { expiryDate?: string; dueAmount?: number }
-): Promise<{
-  ok: boolean
-  providerMessageId?: string
-  errorCode?: string
-  errorMessage?: string
-}> {
-  const dueRounded = Math.max(0, Math.round(meta?.dueAmount ?? 0))
-  const exp = meta?.expiryDate ?? ""
-  const duePart =
-    dueRounded > 0
-      ? ` Also clear your pending dues of ₹${dueRounded}.`
-      : ""
-
-  const messages: Record<typeof type, string> = {
-    EXPIRY_5_DAY:
-      dueRounded > 0
-        ? `Hi ${memberName}, your plan expires in 5 days on ${exp}. Please renew before it ends.${duePart} Contact us: ROYAL FITNESS`
-        : `Hi ${memberName}, your plan expires in 5 days on ${exp}. Please renew before it ends. Contact us: ROYAL FITNESS`,
-    EXPIRY_1_DAY:
-      dueRounded > 0
-        ? `Hi ${memberName}, your plan expires TOMORROW on ${exp}. Please renew now.${duePart} Contact us: ROYAL FITNESS`
-        : `Hi ${memberName}, your plan expires TOMORROW on ${exp}. Please renew now. Contact us: ROYAL FITNESS`,
-    INACTIVITY: `Hi ${memberName}, we miss you at the gym! It has been 4 days since your last visit. Come back today! ROYAL FITNESS`
-  }
-
-  const msg = messages[type]
-  console.log(`[WhatsApp STUB] TO: ${phone} | MSG: ${msg}`)
-  
-  // Simulation: Always succeed for now
-  return { ok: true, providerMessageId: `stub-${Date.now()}` }
-}

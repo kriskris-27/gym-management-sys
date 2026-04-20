@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import prisma from "@/lib/prisma"
-import { signToken, AUTH_COOKIE } from "@/lib/auth"
+import { signToken, AUTH_COOKIE, getAuthSessionMaxAgeSeconds } from "@/lib/auth"
 import { LoginSchema } from "@/lib/validations"
 
 /**
@@ -82,13 +82,14 @@ export async function POST(request: Request) {
       username: user.username 
     }, { status: 200 })
 
+    const sessionMaxAgeSeconds = getAuthSessionMaxAgeSeconds()
     response.cookies.set({
       name: AUTH_COOKIE,
       value: token,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax", // Changed from "strict" to "lax" for better compatibility
-      maxAge: 86400, // 24 hours in seconds
+      maxAge: sessionMaxAgeSeconds,
       path: "/",
     })
 

@@ -4,6 +4,11 @@ import {
   getMemberSubscriptionFinancialSummary,
   type MemberListFinancialSummary,
 } from "../domain/payment"
+import {
+  computeMemberPlanStateFromSubscriptions,
+  type MemberPlanStateSnapshot,
+} from "../domain/member-status"
+import { subscriptionWindowCoversNow } from "./gym-datetime"
 
 /** Prisma select for GET /api/members list rows (single source for typing + queries). */
 export const membersListSelect = {
@@ -16,13 +21,15 @@ export const membersListSelect = {
   updatedAt: true,
   subscriptions: {
     orderBy: { createdAt: "desc" as const },
-    take: 1,
+    take: 24,
     select: {
+      id: true,
       startDate: true,
       endDate: true,
       status: true,
       planNameSnapshot: true,
       planPriceSnapshot: true,
+      createdAt: true,
     },
   },
 } satisfies Prisma.MemberSelect
@@ -59,7 +66,11 @@ export interface MemberFinancials {
   currentPlanRemaining: number
 }
 
-export type MemberWithFinancials = MemberListQueryRow & MemberFinancials
+export type MemberWithFinancials = MemberListQueryRow &
+  MemberFinancials & {
+    planUiState: MemberPlanStateSnapshot["planUiState"]
+    displaySubscription: MemberPlanStateSnapshot["displaySubscription"]
+  }
 
 /**
  * Single source of truth for all financial computations
@@ -152,6 +163,29 @@ export async function attachFinancialsToMembers(
 
   return members.map((member) => {
     const financials = batch.get(member.id) ?? emptyMemberFinancials()
-    return { ...member, ...financials }
+    const liveSub =
+      member.subscriptions.find(
+        (sub) => sub.status === "ACTIVE" && subscriptionWindowCoversNow(sub.startDate, sub.endDate)
+      ) ?? null
+    const { planUiState, displaySub } = computeMemberPlanStateFromSubscriptions(
+      member.subscriptions,
+      liveSub
+    )
+
+    return {
+      ...member,
+      ...financials,
+      planUiState,
+      displaySubscription: displaySub
+        ? {
+            id: displaySub.id,
+            planNameSnapshot: displaySub.planNameSnapshot,
+            planPriceSnapshot: displaySub.planPriceSnapshot,
+            startDate: displaySub.startDate,
+            endDate: displaySub.endDate,
+            status: displaySub.status,
+          }
+        : null,
+    }
   })
 }

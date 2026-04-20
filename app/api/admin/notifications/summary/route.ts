@@ -15,8 +15,9 @@ export async function GET() {
       prisma.notificationLog.groupBy({
         by: ["runId"],
         _count: { _all: true },
+        _max: { sentAt: true },
         where: { runId: { not: "" } },
-        orderBy: { runId: "desc" },
+        orderBy: { _max: { sentAt: "desc" } },
         take: 20,
       }),
       prisma.notificationLog.findFirst({

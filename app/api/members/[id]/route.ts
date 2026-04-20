@@ -13,9 +13,7 @@ import {
 import { computeMemberFinancials, emptyMemberFinancials } from "@/lib/financial-service"
 import {
   MemberLifecycleError,
-  getCanReopenLastPlan,
   renewMemberPlan,
-  reopenLastExpiredPlanIfEligible,
   restoreMember,
   softDeleteMember,
 } from "@/domain/member-lifecycle"
@@ -116,13 +114,6 @@ export async function GET(
       },
     })
 
-    let canReopenLastPlan = false
-    try {
-      canReopenLastPlan = await getCanReopenLastPlan(id)
-    } catch (e) {
-      console.error(`❌ Member GET: getCanReopenLastPlan failed for ${id}`, e)
-    }
-
     return NextResponse.json({
       member: {
         ...memberData,
@@ -135,7 +126,6 @@ export async function GET(
         attendanceCount: _count.sessions,
         lastVisited: sessions[0]?.checkIn || null,
         futurePlansCount,
-        canReopenLastPlan,
       },
     })
   } catch (error) {
@@ -450,22 +440,6 @@ export async function PATCH(
       }
       const restored = await restoreMember(id)
       return NextResponse.json({ member: restored })
-    }
-
-    if (action === "reopen_last_plan") {
-      const { ReopenLastPlanSchema } = await import("@/lib/validations")
-      const validated = ReopenLastPlanSchema.safeParse(body)
-      if (!validated.success) {
-        return NextResponse.json(
-          {
-            error: validated.error.issues[0]?.message ?? "Invalid request",
-            code: "VALIDATION",
-          },
-          { status: 400 }
-        )
-      }
-      const res = await reopenLastExpiredPlanIfEligible(id)
-      return NextResponse.json(res)
     }
 
     // CASE 2: Renewal

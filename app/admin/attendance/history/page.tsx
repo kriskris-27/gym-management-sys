@@ -47,7 +47,7 @@ export default function AttendanceHistoryPage() {
 
   const { data: rawData, isLoading, isError } = useAttendanceByDate(selectedDate)
   const data = rawData as AttendanceHistoryResponse | undefined
-  const sessions = data?.sessions ?? []
+  const sessions = useMemo(() => data?.sessions ?? [], [data?.sessions])
 
   const uniqueMembers = useMemo(
     () => new Set(sessions.map((s) => s.memberId)).size,

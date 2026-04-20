@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
+import { AUTH_COOKIE } from "@/lib/auth"
 
 /**
  * POST: Securely ends the owner's session
- * Logic: Deletes the "gym_token" cookie by instructing the browser to set its expiry to immediate zero.
+ * Logic: Deletes the auth cookie by instructing the browser to set its expiry to immediate zero.
  */
 export async function POST() {
   const isProd = process.env.NODE_ENV === "production"
@@ -10,10 +11,10 @@ export async function POST() {
   const response = NextResponse.json({ success: true })
   
   // Wipe the jwt cookie immediately
-  response.cookies.set("gym_token", "", {
+  response.cookies.set(AUTH_COOKIE, "", {
     httpOnly: true,
     secure: isProd,
-    sameSite: "strict",
+    sameSite: "lax",
     path: "/",
     maxAge: 0,
   })

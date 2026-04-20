@@ -6,7 +6,7 @@ const rateLimitMap = new Map<string, { count: number; start: number }>()
 
 // Clean stale entries every 5 minutes
 setInterval(() => {
-  const cutoff = Date.now() - 60000
+  const cutoff = Date.now() - 5 * 60 * 1000
   rateLimitMap.forEach((data, ip) => {
     if (data.start < cutoff) rateLimitMap.delete(ip)
   })

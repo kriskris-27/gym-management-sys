@@ -6,7 +6,9 @@ import type { Prisma } from "@prisma/client"
 import { PaymentCreateSchema } from "@/lib/validations"
 import { GYM_TIMEZONE } from "@/lib/gym-datetime"
 import {
+  assertGlobalPaymentAllowed,
   assertNoCurrentPlanOverpay,
+  computeGlobalMemberLedger,
   getMemberOutstandingSubscriptionDues,
 } from "@/domain/payment"
 import { lazyExpireStaleSubscriptionsAndSyncMember } from "@/domain/subscription"
@@ -169,6 +171,18 @@ export async function POST(request: Request) {
       )
     }
 
+    const globalLedger = await computeGlobalMemberLedger(data.memberId)
+    const globalGuard = assertGlobalPaymentAllowed({
+      amount: data.amount,
+      globalRemaining: globalLedger.remaining,
+    })
+    if (!globalGuard.ok) {
+      return NextResponse.json(
+        { error: globalGuard.message, code: globalGuard.code },
+        { status: globalGuard.code === "MEMBER_FULLY_PAID" ? 409 : 400 }
+      )
+    }
+
     const outstanding = await getMemberOutstandingSubscriptionDues(data.memberId)
     if (outstanding.length === 0) {
       return NextResponse.json(
@@ -180,7 +194,8 @@ export async function POST(request: Request) {
         { status: 409 }
       )
     }
-    const targetDue = outstanding[0]
+    // Deterministic policy: apply front-desk collection to oldest unpaid due first.
+    const targetDue = outstanding[outstanding.length - 1]
     const targetGuard = assertNoCurrentPlanOverpay({
       amount: data.amount,
       remaining: targetDue.remaining,

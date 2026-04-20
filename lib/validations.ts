@@ -270,6 +270,23 @@ export const RenewMemberSchema = z.object({
   )
   .refine(
     (data) => {
+      if (!data.endDate) return true
+      return !Number.isNaN(Date.parse(data.endDate))
+    },
+    { message: "Invalid end date", path: ["endDate"] }
+  )
+  .refine(
+    (data) => {
+      if (!data.startDate || !data.endDate) return true
+      const start = Date.parse(data.startDate)
+      const end = Date.parse(data.endDate)
+      if (Number.isNaN(start) || Number.isNaN(end)) return true
+      return end > start
+    },
+    { message: "Membership end date must be after the start date", path: ["endDate"] }
+  )
+  .refine(
+    (data) => {
       if (data.membershipType !== "OTHERS") return true
       const nameOk = !!data.manualPlanName?.trim()
       const amountOk = typeof data.customPrice === "number" && Number.isFinite(data.customPrice)
@@ -300,12 +317,5 @@ export const RenewMemberSchema = z.object({
  */
 export const RestoreMemberSchema = z.object({
   action: z.literal("restore")
-}).strict();
-
-/**
- * Reopen last plan — latest subscription by createdAt must be EXPIRED with end date not past (IST).
- */
-export const ReopenLastPlanSchema = z.object({
-  action: z.literal("reopen_last_plan"),
 }).strict();
 

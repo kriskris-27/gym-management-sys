@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client"
 import { calcDuration, formatDuration, fromDate } from "../lib/utils"
 import { DateTime } from "luxon"
 import {
+  GYM_TIMEZONE,
   formatMemberDate,
   getTodaySessionDayJS,
   isMembershipEndPast,
@@ -328,7 +329,7 @@ export async function cleanupOldSessionsInTransaction(
 
   for (const session of oldOpenSessions) {
     // Set checkOut to gym closing time (default 10 PM) on that session's day
-    const sessionDayIST = DateTime.fromJSDate(session.sessionDay, { zone: 'Asia/Kolkata' })
+    const sessionDayIST = DateTime.fromJSDate(session.sessionDay, { zone: GYM_TIMEZONE })
     const closingTime = sessionDayIST.set({ hour: DEFAULT_CLOSING_HOUR, minute: 0, second: 0 })
     const checkInTime = DateTime.fromJSDate(session.checkIn)
     // Never set checkOut before checkIn
@@ -389,8 +390,8 @@ export function validateSession(
     }
 
     // Check-out must be same day as check-in (IST)
-    const checkInIST = checkInDT.setZone('Asia/Kolkata')
-    const checkOutIST = checkOutDT.setZone('Asia/Kolkata')
+    const checkInIST = checkInDT.setZone(GYM_TIMEZONE)
+    const checkOutIST = checkOutDT.setZone(GYM_TIMEZONE)
 
     if (!checkOutIST.hasSame(checkInIST, 'day')) {
       errors.push("Check-out must be on same day as check-in (IST)")
@@ -532,9 +533,10 @@ export async function getAttendanceStats(
     return sum + calcDuration(fromDate(session.checkIn), fromDate(session.checkOut))
   }, 0)
   const avgMinutes = validSessions > 0 ? Math.round(totalMinutes / validSessions) : 0
+  const totalSessions = validSessions + invalidSessions
 
   return {
-    totalSessions: validSessions,
+    totalSessions,
     validSessions,
     invalidSessions,
     totalMinutes,

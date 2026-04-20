@@ -68,16 +68,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     
     const checkAuth = async () => {
       try {
-        const res = await fetch("/api/dashboard/summary", { credentials: 'include' })
-        if (!res.ok && mounted) {
-          console.log('Auth check failed, redirecting to login')
+        const res = await fetch("/api/auth/session", { credentials: "include" })
+        if (res.status === 401 && mounted) {
           router.push("/login")
+        } else if (!res.ok && mounted) {
+          console.warn("Session check non-401 failure; staying on page", res.status)
         }
       } catch (error) {
-        console.error('Auth check error:', error)
-        if (mounted) {
-          router.push("/login")
-        }
+        console.error("Session check network error:", error)
+        // Do not redirect on transient network errors — avoids false logouts.
       } finally {
         if (mounted) {
           setAuthChecked(true)
