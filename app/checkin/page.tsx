@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import Image from "next/image"
 import { DateTime } from "luxon"
 import { GYM_TIMEZONE } from "@/lib/gym-datetime"
 import { formatDuration } from "@/lib/utils"
@@ -342,9 +343,14 @@ function CheckinContent() {
       {status === "idle" && (
         <div className="checkin-state flex w-full max-w-[min(100%,26rem)] flex-col items-center">
           <div className="mb-10 flex flex-col items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#D11F00]">
-              <span className="text-[20px] font-black text-white">S</span>
-            </div>
+            <Image
+              src="/logo.png"
+              alt="Royal Fitness logo"
+              width={72}
+              height={72}
+              priority
+              className="h-[72px] w-[72px] object-contain"
+            />
             <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-white">
               Royal Fitness
             </p>
